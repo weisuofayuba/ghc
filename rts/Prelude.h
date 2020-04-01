@@ -63,6 +63,7 @@ PRELUDE_CLOSURE(base_GHCziEventziWindows_processRemoteCompletion_closure);
 PRELUDE_CLOSURE(base_GHCziTopHandler_flushStdHandles_closure);
 PRELUDE_CLOSURE(base_GHCziTopHandler_runMainIO_closure);
 
+PRELUDE_INFO(ghczmprim_GHCziCString_unpackCStringzh_info);
 PRELUDE_INFO(ghczmprim_GHCziTypes_Czh_con_info);
 PRELUDE_INFO(ghczmprim_GHCziTypes_Izh_con_info);
 PRELUDE_INFO(ghczmprim_GHCziTypes_Fzh_con_info);

@@ -138,8 +138,8 @@ instance Outputable ForeignHint where
 --
 
 pprStatics :: Platform -> GenCmmStatics a -> SDoc
-pprStatics platform (CmmStatics lbl itbl ccs payload) =
-  pdoc platform lbl <> colon <+> pdoc platform itbl <+> ppr ccs <+> pdoc platform payload
+pprStatics platform (CmmStatics lbl itbl ccs payload extras) =
+  pdoc platform lbl <> colon <+> pdoc platform itbl <+> ppr ccs <+> pdoc platform payload <+> ppr extras
 pprStatics platform (CmmStaticsRaw lbl ds) = vcat ((pdoc platform lbl <> colon) : map (pprStatic platform) ds)
 
 pprStatic :: Platform -> CmmStatic -> SDoc

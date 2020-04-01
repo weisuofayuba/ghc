@@ -13,6 +13,8 @@
 #include "Cmm.h"
 #include "Updates.h"
 
+import CLOSURE ghczmprim_GHCziCString_unpackCStringzh_closure;
+
 /* -----------------------------------------------------------------------------
    The code for a thunk that simply extracts a field from a
    single-constructor datatype depends only on the offset of the field
@@ -286,3 +288,70 @@ INFO_TABLE(stg_ap_7_upd,7,0,THUNK,"stg_ap_7_upd_info","stg_ap_7_upd_info")
            StgThunk_payload(node,6));
     }
 }
+
+/* -----------------------------------------------------------------------------
+   Making strings
+   -------------------------------------------------------------------------- */
+
+/*
+ * Note [MK_STRING]
+ * ~~~~~~~~~~~~~~~~
+ * Strings are extremely common. In Core they will typically manifest as the
+ * a pair of top-level bindings:
+ *
+ *     s :: String
+ *     s = unpackCString# s#
+ *
+ *     s# :: Addr#
+ *     s# = "hello world"#
+ *
+ * It turns out that `s` is a non-trivial amount of code which is duplicated
+ * for every `String` literal. To avoid this duplicate, we have a standard
+ * unpack-string closure, MK_STRING.
+ * Note that currently we only do this for ASCII strings; strings mentioning
+ * non-ASCII characters are represented by CAF applications of
+ * unpackCStringUtf8# as before.
+ *
+ * MK_STRING closures are similar to standard THUNK_STATIC closures but with a
+ * non-GC pointer to a C-string at the end (the "extra" pointer).
+ *
+ * Closure layout:
+ *
+ * ┌───────────────────┐       ┌──► ┌──────────────────────────┐
+ * │ stg_MK_STRING     │       │    │ "hello world ..."        │
+ * ├───────────────────┤       │    └──────────────────────────┘
+ * │ indirectee        │       │
+ * ├───────────────────┤       │
+ * │ static_link       │       │
+ * ├───────────────────┤       │
+ * │ saved_info        │       │
+ * ├───────────────────┤       │
+ * │ the_string       ─┼───────┘
+ * └───────────────────┘
+ *
+ */
+
+stg_do_MK_STRING(P_ node, P_ newCAF_ret) {
+    STK_CHK_PP(WDS(2), stg_do_MK_STRING, node, newCAF_ret);
+    W_ str;
+    str = StgThunk_payload(node, 2);
+    push (UPDATE_FRAME_FIELDS(,,stg_bh_upd_frame_info, CCCS, 0, newCAF_ret)) {
+        jump ghczmprim_GHCziCString_unpackCStringzh_info(node, str);
+    }
+}
+
+INFO_TABLE(stg_MK_STRING, 0, 0, THUNK_STATIC, "stg_MK_STRING", "stg_MK_STRING")
+    (P_ node)
+{
+    W_ newCAF_ret;
+    (newCAF_ret) = ccall newCAF(BaseReg "ptr", node "ptr");
+
+    if (newCAF_ret == 0) {
+        // We raced with another thread to evaluate the CAF and they won;
+        // `node` should now be an indirection.
+        ENTER(node);
+    } else {
+        jump stg_do_MK_STRING(node, newCAF_ret);
+    }
+}
+

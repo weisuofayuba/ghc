@@ -241,6 +241,9 @@ data GenCmmStatics (rawOnly :: Bool) where
       -> CmmInfoTable
       -> CostCentreStack
       -> [CmmLit]     -- Payload
+      -> [CmmLit]     -- Non-pointers that go to the end of the closure
+                      -- This is used by MK_STRING closures.
+                      -- See Note [MK_STRING] in StgStdThunks.cmm.
       -> GenCmmStatics 'False
 
     -- | Static data, after SRTs are generated
