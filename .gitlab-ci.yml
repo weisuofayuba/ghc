@@ -968,6 +968,57 @@ release-x86_64-linux-ubuntu2004:
   extends: .build-x86_64-linux-ubuntu2004
 
 #################################
+# i386-linux-alpine
+#################################
+
+.build-i386-linux-alpine-hadrian:
+  extends: .validate-linux-hadrian
+  stage: full-build
+  image: "registry.gitlab.haskell.org/ghc/ci-images/i386-linux-alpine3_12:$DOCKER_REV"
+  # There are currently a few failing tests
+  allow_failure: true
+  variables:
+    TEST_ENV: "i386-linux-alpine"
+    BUILD_FLAVOUR: "validate+fully_static"
+    BIN_DIST_NAME: "ghc-i386-alpine-linux"
+    HADRIAN_ARGS: "--docs=no-sphinx"
+    # encoding004: due to lack of locale support
+    # T10458, ghcilink002: due to #17869
+    # linker_unload_native: due to musl not supporting any means of probing dynlib dependencies
+    #   (see Note [Object unloading]).
+    BROKEN_TESTS: "encoding004 T10458 ghcilink002 linker_unload_native"
+  cache:
+    key: linux-i386-alpine-$CACHE_REV
+  artifacts:
+    when: always
+    expire_in: 2 week
+
+validate-i386-linux-alpine-hadrian:
+  extends: .build-i386-linux-alpine-hadrian
+  rules:
+    - if: '$CI_MERGE_REQUEST_LABELS !~ /.*fast-ci.*/'
+
+release-i386-linux-alpine-integer-simple:
+  extends:
+    - .build-i386-linux-alpine-hadrian
+    - .release
+  variables:
+    BIGNUM_BACKEND: native
+    BUILD_FLAVOUR: "validate+fully_static"
+
+release-i386-linux-alpine-integer-gmp:
+  extends:
+    - .build-i386-linux-alpine-hadrian
+    - .release
+  variables:
+    BIGNUM_BACKEND: gmp
+    BUILD_FLAVOUR: "validate+fully_static"
+
+nightly-i386-linux-alpine:
+  <<: *nightly
+  extends: .build-i386-linux-alpine-hadrian
+
+#################################
 # x86_64-linux-alpine
 #################################
 
