@@ -655,6 +655,11 @@ validate-aarch64-darwin:
   rules:
     - if: '$CI_MERGE_REQUEST_LABELS !~ /.*fast-ci.*/'
 
+validate-aarch64-darwin-llvm:
+  extends: .build-aarch64-darwin
+  variables:
+    BUILD_FLAVOUR: "perf+llvm"
+
 release-aarch64-darwin:
   <<: *release
   extends: .build-aarch64-darwin
