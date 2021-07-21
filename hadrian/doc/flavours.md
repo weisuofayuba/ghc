@@ -232,6 +232,11 @@ The supported transformers are listed below:
         <td>Disables building of libraries in profiled build ways.</td>
     </tr>
     <tr>
+        <td><code>lint</code></td>
+        <td>Enable Core, STG, and C-- linting in all compilation with the stage1
+        compiler.</td>
+    </tr>
+    <tr>
         <td><code>omit_pragmas</code></td>
         <td>Build the stage2 compiler with -fomit-interface-pragmas to reduce
         recompilation.</td>
