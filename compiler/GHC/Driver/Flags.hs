@@ -60,6 +60,7 @@ data DumpFlag
    | Opt_D_dump_cmm_split
    | Opt_D_dump_cmm_info
    | Opt_D_dump_cmm_cps
+   | Opt_D_dump_cmm_thread_sanitizer
    -- end cmm subflags
    | Opt_D_dump_cfg_weights -- ^ Dump the cfg used for block layout.
    | Opt_D_dump_asm
@@ -286,6 +287,7 @@ data GeneralFlag
    | Opt_Ticky_Allocd
    | Opt_Ticky_LNE
    | Opt_Ticky_Dyn_Thunk
+   | Opt_CmmThreadSanitizer
    | Opt_RPath
    | Opt_RelativeDynlibPaths
    | Opt_Hpc

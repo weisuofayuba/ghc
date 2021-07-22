@@ -2388,6 +2388,8 @@ dynamic_flags_deps = [
         (setDumpFlag Opt_D_dump_cmm_cps)
   , make_ord_flag defGhcFlag "ddump-cmm-opt"
         (setDumpFlag Opt_D_dump_opt_cmm)
+  , make_ord_flag defGhcFlag "ddump-cmm-thread-sanitizer"
+        (setDumpFlag Opt_D_dump_cmm_thread_sanitizer)
   , make_ord_flag defGhcFlag "ddump-cfg-weights"
         (setDumpFlag Opt_D_dump_cfg_weights)
   , make_ord_flag defGhcFlag "ddump-core-stats"
@@ -3397,7 +3399,8 @@ fFlagsDeps = [
   flagSpec "show-loaded-modules"              Opt_ShowLoadedModules,
   flagSpec "whole-archive-hs-libs"            Opt_WholeArchiveHsLibs,
   flagSpec "keep-cafs"                        Opt_KeepCAFs,
-  flagSpec "link-rts"                         Opt_LinkRts
+  flagSpec "link-rts"                         Opt_LinkRts,
+  flagSpec "cmm-thread-sanitizer"             Opt_CmmThreadSanitizer
   ]
   ++ fHoleFlags
 

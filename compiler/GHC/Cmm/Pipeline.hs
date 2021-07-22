@@ -19,6 +19,7 @@ import GHC.Cmm.ContFlowOpt
 import GHC.Cmm.LayoutStack
 import GHC.Cmm.Sink
 import GHC.Cmm.Dataflow.Collections
+import GHC.Cmm.ThreadSanitizer
 
 import GHC.Types.Unique.Supply
 import GHC.Driver.Session
@@ -148,6 +149,12 @@ cpsTop logger platform dflags proc =
       g <- return (map removeUnreachableBlocksProc g)
            -- See Note [unreachable blocks]
       dumps Opt_D_dump_cmm_cfg "Post control-flow optimisations" g
+
+      g <- {-# SCC "annotateTSAN" #-} return $
+          if gopt Opt_CmmThreadSanitizer dflags
+          then map (annotateTSAN platform) g
+          else g
+      dumps Opt_D_dump_cmm_thread_sanitizer "ThreadSanitizer instrumentation" g -- TODO: flag
 
       return (Left (cafEnv, g))
 
