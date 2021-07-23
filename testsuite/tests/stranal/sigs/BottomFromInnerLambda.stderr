@@ -2,20 +2,20 @@
 ==================== Strictness signatures ====================
 BottomFromInnerLambda.$trModule:
 BottomFromInnerLambda.expensive: <1!P(SL)>
-BottomFromInnerLambda.f: <1!P(SL)>
+BottomFromInnerLambda.f: <1!S><1!S>b
 
 
 
 ==================== Cpr signatures ====================
 BottomFromInnerLambda.$trModule:
 BottomFromInnerLambda.expensive: 1
-BottomFromInnerLambda.f:
+BottomFromInnerLambda.f: b
 
 
 
 ==================== Strictness signatures ====================
 BottomFromInnerLambda.$trModule:
 BottomFromInnerLambda.expensive: <1!P(1L)>
-BottomFromInnerLambda.f: <1!P(1L)>
+BottomFromInnerLambda.f: <1!P(1!S)><1!S>b
 
 

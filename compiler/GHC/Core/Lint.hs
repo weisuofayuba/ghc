@@ -667,8 +667,8 @@ lintLetBind top_lvl rec_flag binder rhs rhs_ty
        -- exceeds idArity, but that is an unnecessary complication, see
        -- Note [idArity varies independently of dmdTypeDepth] in GHC.Core.Opt.DmdAnal
 
-       -- Check that the binder's arity is within the bounds imposed by
-       -- the type and the strictness signature. See Note [exprArity invariant]
+       -- Check that the binder's arity is within the bounds imposed by the type
+       -- and the strictness signature. See Note [Arity invariants for bindings]
        -- and Note [Trimming arity]
 
        ; checkL (typeArity (idType binder) >= idArity binder)

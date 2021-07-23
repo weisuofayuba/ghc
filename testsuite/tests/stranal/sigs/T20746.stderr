@@ -1,7 +1,7 @@
 
 ==================== Strictness signatures ====================
 Foo.$trModule:
-Foo.f: <MP(A,MCM(L),A)><L>
+Foo.f: <LP(A,L,A)><L>
 Foo.foogle: <L><L>
 
 
