@@ -552,8 +552,7 @@ tcHiBootIface hsc_src mod
         ; let units     = hsc_units hsc_env
         ; let dflags    = hsc_dflags hsc_env
         ; let logger    = hsc_logger hsc_env
-        ; let hooks     = hsc_hooks hsc_env
-        ; read_result <- liftIO $ findAndReadIface logger nc fc hooks units home_unit dflags
+        ; read_result <- liftIO $ findAndReadIface logger nc fc units home_unit dflags
                                 need (fst (getModuleInstantiation mod)) mod
                                 IsBoot  -- Hi-boot file
 

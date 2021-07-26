@@ -47,7 +47,6 @@ import GHC.Driver.Env
 import GHC.Driver.Errors.Types
 import GHC.Driver.Session
 import GHC.Driver.Backend
-import GHC.Driver.Hooks
 import GHC.Driver.Plugins
 
 import GHC.Iface.Syntax
@@ -697,8 +696,7 @@ computeInterface hsc_env doc_str hi_boot_file mod0 = do
   let units      = hsc_units hsc_env
   let dflags     = hsc_dflags hsc_env
   let logger     = hsc_logger hsc_env
-  let hooks      = hsc_hooks hsc_env
-  let find_iface m = findAndReadIface logger name_cache fc hooks units home_unit dflags doc_str
+  let find_iface m = findAndReadIface logger name_cache fc units home_unit dflags doc_str
                                       m mod0 hi_boot_file
   case getModuleInstantiation mod0 of
       (imod, Just indef) | isHomeUnitIndefinite home_unit ->
@@ -751,8 +749,7 @@ moduleFreeHolesPrecise doc_str mod
         let units     = hsc_units hsc_env
         let dflags    = hsc_dflags hsc_env
         let logger    = hsc_logger hsc_env
-        let hooks     = hsc_hooks hsc_env
-        mb_iface <- liftIO $ findAndReadIface logger nc fc hooks units home_unit dflags
+        mb_iface <- liftIO $ findAndReadIface logger nc fc units home_unit dflags
                                               (text "moduleFreeHolesPrecise" <+> doc_str)
                                               imod mod NotBoot
         case mb_iface of
@@ -847,7 +844,6 @@ findAndReadIface
   :: Logger
   -> NameCache
   -> FinderCache
-  -> Hooks
   -> UnitState
   -> HomeUnit
   -> DynFlags
@@ -858,7 +854,7 @@ findAndReadIface
                      -- module we read out.
   -> IsBootInterface -- ^ Looking for .hi-boot or .hi file
   -> IO (MaybeErr SDoc (ModIface, FilePath))
-findAndReadIface logger name_cache fc hooks unit_state home_unit dflags doc_str mod wanted_mod hi_boot_file = do
+findAndReadIface logger name_cache fc unit_state home_unit dflags doc_str mod wanted_mod hi_boot_file = do
   let profile = targetProfile dflags
 
   trace_if logger (sep [hsep [text "Reading",
@@ -873,11 +869,7 @@ findAndReadIface logger name_cache fc hooks unit_state home_unit dflags doc_str 
   -- See Note [GHC.Prim] in primops.txt.pp.
   -- TODO: make this check a function
   if mod `installedModuleEq` gHC_PRIM
-      then do
-          let iface = case ghcPrimIfaceHook hooks of
-                       Nothing -> ghcPrimIface
-                       Just h  -> h
-          return (Succeeded (iface, "<built in interface for GHC.Prim>"))
+      then return (Succeeded (ghcPrimIface, "<built in interface for GHC.Prim>"))
       else do
           -- Look for the file
           mb_found <- liftIO (findExactModule fc dflags unit_state home_unit mod)

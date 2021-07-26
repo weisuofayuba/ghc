@@ -587,7 +587,6 @@ mergeSignatures
     let home_unit  = hsc_home_unit hsc_env
     let dflags     = hsc_dflags hsc_env
     let logger     = hsc_logger hsc_env
-    let hooks      = hsc_hooks hsc_env
 
     -- STEP 1: Figure out all of the external signature interfaces
     -- we are going to merge in.
@@ -602,7 +601,7 @@ mergeSignatures
             ctx = initSDocContext dflags defaultUserStyle
         fmap fst
          . withException ctx
-         $ findAndReadIface logger nc fc hooks unit_state home_unit dflags
+         $ findAndReadIface logger nc fc unit_state home_unit dflags
                             (text "mergeSignatures") im m NotBoot
 
     -- STEP 3: Get the unrenamed exports of all these interfaces,
@@ -1019,8 +1018,7 @@ checkImplements impl_mod req_mod@(Module uid mod_name) = do
     let units     = hsc_units hsc_env
     let dflags    = hsc_dflags hsc_env
     let logger    = hsc_logger hsc_env
-    let hooks     = hsc_hooks hsc_env
-    mb_isig_iface <- liftIO $ findAndReadIface logger nc fc hooks units home_unit dflags
+    mb_isig_iface <- liftIO $ findAndReadIface logger nc fc units home_unit dflags
                                                (text "checkImplements 2")
                                                isig_mod sig_mod NotBoot
     isig_iface <- case mb_isig_iface of

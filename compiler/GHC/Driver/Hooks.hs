@@ -17,7 +17,6 @@ module GHC.Driver.Hooks
    , tcForeignExportsHook
    , hscFrontendHook
    , hscCompileCoreExprHook
-   , ghcPrimIfaceHook
    , runPhaseHook
    , runMetaHook
    , linkHook
@@ -92,7 +91,6 @@ emptyHooks = Hooks
   , tcForeignExportsHook   = Nothing
   , hscFrontendHook        = Nothing
   , hscCompileCoreExprHook = Nothing
-  , ghcPrimIfaceHook       = Nothing
   , runPhaseHook           = Nothing
   , runMetaHook            = Nothing
   , linkHook               = Nothing
@@ -136,7 +134,6 @@ data Hooks = Hooks
   , hscFrontendHook        :: !(Maybe (ModSummary -> Hsc FrontendResult))
   , hscCompileCoreExprHook ::
                !(Maybe (HscEnv -> (SrcSpan, Maybe ModuleNameWithIsBoot) -> CoreExpr -> IO ForeignHValue))
-  , ghcPrimIfaceHook       :: !(Maybe ModIface)
   , runPhaseHook           :: !(Maybe PhaseHook)
   , runMetaHook            :: !(Maybe (MetaHook TcM))
   , linkHook               :: !(Maybe (GhcLink -> DynFlags -> Bool
