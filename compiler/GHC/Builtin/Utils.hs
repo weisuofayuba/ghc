@@ -142,7 +142,6 @@ knownKeyNames
              , concatMap wired_tycon_kk_names typeNatTyCons
              , map idName wiredInIds
              , map (idName . primOpId) allThePrimOps
-             , map (idName . primOpWrapperId) allThePrimOps
              , basicKnownKeyNames
              , templateHaskellNames
              ]

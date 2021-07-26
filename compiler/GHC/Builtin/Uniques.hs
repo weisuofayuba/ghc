@@ -26,7 +26,7 @@ module GHC.Builtin.Uniques
 
       -- ** Making built-in uniques
     , mkAlphaTyVarUnique
-    , mkPrimOpIdUnique, mkPrimOpWrapperUnique
+    , mkPrimOpIdUnique
     , mkPreludeMiscIdUnique, mkPreludeDataConUnique
     , mkPreludeTyConUnique, mkPreludeClassUnique
     , mkCoVarUnique
@@ -323,7 +323,6 @@ mkAlphaTyVarUnique     :: Int -> Unique
 mkPreludeClassUnique   :: Int -> Unique
 mkPrimOpIdUnique       :: Int -> Unique
 -- See Note [Primop wrappers] in GHC.Builtin.PrimOps.
-mkPrimOpWrapperUnique  :: Int -> Unique
 mkPreludeMiscIdUnique  :: Int -> Unique
 mkCoVarUnique          :: Int -> Unique
 
@@ -332,8 +331,7 @@ mkCoVarUnique        i = mkUnique 'g' i
 mkPreludeClassUnique i = mkUnique '2' i
 
 --------------------------------------------------
-mkPrimOpIdUnique op         = mkUnique '9' (2*op)
-mkPrimOpWrapperUnique op    = mkUnique '9' (2*op+1)
+mkPrimOpIdUnique op         = mkUnique '9' op
 mkPreludeMiscIdUnique  i    = mkUnique '0' i
 
 -- The "tyvar uniques" print specially nicely: a, b, c, etc.

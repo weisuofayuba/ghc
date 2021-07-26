@@ -162,7 +162,6 @@ import GHC.Stg.FVs      ( annTopBindingsFreeVars )
 import GHC.Stg.Pipeline ( stg2stg )
 
 import GHC.Builtin.Utils
-import GHC.Builtin.Names
 import GHC.Builtin.Uniques ( mkPseudoUniqueE )
 
 import qualified GHC.StgToCmm as StgToCmm ( codeGen )
@@ -872,10 +871,9 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
   --
   -- We usually desugar even when we are not generating code, otherwise we
   -- would miss errors thrown by the desugaring (see #10600). The only
-  -- exceptions are when the Module is Ghc.Prim or when it is not a
-  -- HsSrcFile Module.
+  -- exceptions are when it is not a HsSrcFile Module.
   mb_desugar <-
-      if ms_mod summary /= gHC_PRIM && hsc_src == HsSrcFile
+      if hsc_src == HsSrcFile
       then Just <$> hscDesugar' (ms_location summary) tc_result
       else pure Nothing
 

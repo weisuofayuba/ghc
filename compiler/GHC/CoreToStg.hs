@@ -47,9 +47,10 @@ import GHC.Types.SrcLoc    ( mkGeneralSrcSpan )
 
 import GHC.Unit.Module
 import GHC.Builtin.Types ( unboxedUnitDataCon )
+import GHC.Builtin.Utils ( primOpId )
 import GHC.Data.FastString
 import GHC.Platform.Ways
-import GHC.Builtin.PrimOps ( PrimCall(..), primOpWrapperId )
+import GHC.Builtin.PrimOps ( PrimCall(..) )
 
 import GHC.Utils.Outputable
 import GHC.Utils.Monad
@@ -602,7 +603,7 @@ coreToStgArgs (arg : args) = do         -- Non-type argument
         stg_arg = case arg'' of
            StgApp v []                  -> StgVarArg v
            StgConApp con _ [] _         -> StgVarArg (dataConWorkId con)
-           StgOpApp (StgPrimOp op) [] _ -> StgVarArg (primOpWrapperId op)
+           StgOpApp (StgPrimOp op) [] _ -> StgVarArg (primOpId op)
            StgLit lit                   -> StgLitArg lit
            _ -> pprPanic "coreToStgArgs" (ppr arg $$ pprStgExpr panicStgPprOpts arg' $$ pprStgExpr panicStgPprOpts arg'')
 

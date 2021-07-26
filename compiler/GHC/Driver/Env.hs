@@ -63,8 +63,6 @@ import GHC.Types.Name.Env
 import GHC.Types.TyThing
 import GHC.Types.Unique.FM
 
-import GHC.Builtin.Names ( gHC_PRIM )
-
 import GHC.Data.Maybe
 
 import GHC.Utils.Exception as Ex
@@ -273,12 +271,6 @@ hptSomeThingsBelowUs extract include_hi_boot hsc_env mod
     |   -- Find each non-hi-boot module below me
       GWIB { gwib_mod = mod, gwib_isBoot = is_boot } <- Set.toList (hptModulesBelow hsc_env mod)
     , include_hi_boot || (is_boot == NotBoot)
-
-        -- unsavoury: when compiling the base package with --make, we
-        -- sometimes try to look up RULES etc for GHC.Prim. GHC.Prim won't
-        -- be in the HPT, because we never compile it; it's in the EPT
-        -- instead. ToDo: clean up, and remove this slightly bogus filter:
-    , mod /= moduleName gHC_PRIM
 
         -- Look it up in the HPT
     , let things = case lookupHpt hpt mod of

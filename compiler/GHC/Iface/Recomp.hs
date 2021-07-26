@@ -456,7 +456,7 @@ checkDependencies hsc_env summary iface
               let reason = moduleNameString mod ++ " changed"
               in classify reason <$> findImportedModule fc units home_unit dflags mod (mb_pkg))
               (ms_imps summary ++ ms_srcimps summary)
-    case sequence (res ++ [Right (fake_ghc_prim_import)| ms_ghc_prim_import summary]) of
+    case sequence res of
       Left recomp -> return recomp
       Right es -> do
         let (hs, ps) = partitionEithers es
@@ -476,14 +476,6 @@ checkDependencies hsc_env summary iface
    bkpk_units    = map (("Signature",) . indefUnit . instUnitInstanceOf . moduleUnit) (requirementMerges units (moduleName (mi_module iface)))
 
    implicit_deps = map ("Implicit",) (implicitPackageDeps dflags)
-
-   -- GHC.Prim is very special and doesn't appear in ms_textual_imps but
-   -- ghc-prim will appear in the package dependencies still. In order to not confuse
-   -- the recompilation logic we need to not forget we imported GHC.Prim.
-   fake_ghc_prim_import = if homeUnitId home_unit == primUnitId
-                            then Left (mkModuleName "GHC.Prim")
-                            else Right ("GHC.Prim", primUnitId)
-
 
    classify _ (Found _ mod)
     | isHomeUnit home_unit (moduleUnit mod) = Right (Left (moduleName mod))

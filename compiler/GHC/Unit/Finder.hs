@@ -41,8 +41,6 @@ import GHC.Driver.Session
 
 import GHC.Platform.Ways
 
-import GHC.Builtin.Names ( gHC_PRIM )
-
 import GHC.Unit.Types
 import GHC.Unit.Module
 import GHC.Unit.Home
@@ -351,15 +349,7 @@ findInstalledHomeModule fc dflags home_unit mod_name = do
         -- compilation mode we look for .hi and .hi-boot files only.
      exts | isOneShot (ghcMode dflags) = hi_exts
           | otherwise                  = source_exts
-   in
-
-   -- special case for GHC.Prim; we won't find it in the filesystem.
-   -- This is important only when compiling the base package (where GHC.Prim
-   -- is a home module).
-   if mod `installedModuleEq` gHC_PRIM
-         then return (InstalledFound (error "GHC.Prim ModLocation") mod)
-         else searchPathExts home_path mod exts
-
+   in searchPathExts home_path mod exts
 
 -- | Search for a module in external packages only.
 findPackageModule :: FinderCache -> UnitState -> DynFlags -> InstalledModule -> IO InstalledFindResult
@@ -381,12 +371,6 @@ findPackageModule_ fc dflags mod pkg_conf = do
   massertPpr (moduleUnit mod == unitId pkg_conf)
              (ppr (moduleUnit mod) <+> ppr (unitId pkg_conf))
   modLocationCache fc mod $
-
-    -- special case for GHC.Prim; we won't find it in the filesystem.
-    if mod `installedModuleEq` gHC_PRIM
-          then return (InstalledFound (error "GHC.Prim ModLocation") mod)
-          else
-
     let
        tag = waysBuildTag (ways dflags)
 

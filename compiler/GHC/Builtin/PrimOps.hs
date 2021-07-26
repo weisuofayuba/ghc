@@ -10,7 +10,6 @@ module GHC.Builtin.PrimOps (
         PrimOp(..), PrimOpVecCat(..), allThePrimOps,
         primOpType, primOpSig, primOpResultType,
         primOpTag, maxPrimOpTag, primOpOcc,
-        primOpWrapperId,
 
         tagToEnumKey,
 
@@ -31,20 +30,16 @@ import GHC.Builtin.Types
 
 import GHC.Cmm.Type
 import GHC.Types.Demand
-import GHC.Types.Id      ( Id, mkVanillaGlobalWithInfo )
-import GHC.Types.Id.Info ( vanillaIdInfo, setCafInfo, CafInfo(NoCafRefs) )
 import GHC.Types.Name
-import GHC.Builtin.Names ( gHC_PRIMOPWRAPPERS )
 import GHC.Core.TyCon    ( TyCon, isPrimTyCon, PrimRep(..) )
 import GHC.Core.Type
 import GHC.Types.RepType ( tyConPrimRep1 )
 import GHC.Types.Basic   ( Arity, Boxity(..) )
 import GHC.Types.Fixity  ( Fixity(..), FixityDirection(..) )
-import GHC.Types.SrcLoc  ( wiredInSrcSpan )
 import GHC.Types.ForeignCall ( CLabelString )
 import GHC.Types.SourceText  ( SourceText(..) )
 import GHC.Types.Unique  ( Unique)
-import GHC.Builtin.Uniques (mkPrimOpIdUnique, mkPrimOpWrapperUnique )
+import GHC.Builtin.Uniques ( mkPrimOpIdUnique )
 import GHC.Unit.Types    ( Unit )
 import GHC.Utils.Outputable
 import GHC.Data.FastString
@@ -620,58 +615,7 @@ primOpOcc op = case primOpInfo op of
                Compare   occ _     -> occ
                GenPrimOp occ _ _ _ -> occ
 
-{- Note [Primop wrappers]
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To support (limited) use of primops in GHCi genprimopcode generates the
-GHC.PrimopWrappers module. This module contains a "primop wrapper"
-binding for each primop. These are standard Haskell functions mirroring the
-types of the primops they wrap. For instance, in the case of plusInt# we would
-have:
-
-    module GHC.PrimopWrappers where
-    import GHC.Prim as P
-
-    plusInt# :: Int# -> Int# -> Int#
-    plusInt# a b = P.plusInt# a b
-
-The Id for the wrapper of a primop can be found using
-'GHC.Builtin.PrimOps.primOpWrapperId'. However, GHCi does not use this mechanism
-to link primops; it rather does a rather hacky symbol lookup (see
-GHC.ByteCode.Linker.primopToCLabel). TODO: Perhaps this should be changed?
-
-Note that these wrappers aren't *quite* as expressive as their unwrapped
-breathren, in that they may exhibit less representation polymorphism.
-For instance, consider the case of mkWeakNoFinalizer#, which has type:
-
-    mkWeakNoFinalizer# :: forall (r :: RuntimeRep) (k :: TYPE r) (v :: Type).
-                          k -> v
-                       -> State# RealWorld
-                       -> (# State# RealWorld, Weak# v #)
-
-Naively we could generate a wrapper of the form,
-
-
-    mkWeakNoFinalizer# k v s = GHC.Prim.mkWeakNoFinalizer# k v s
-
-However, this would require that 'k' bind the representation-polymorphic key,
-which is disallowed by our representation polymorphism validity checks
-(see Note [Representation polymorphism invariants] in GHC.Core).
-Consequently, we give the wrapper the simpler, less polymorphic type
-
-    mkWeakNoFinalizer# :: forall (k :: Type) (v :: Type).
-                          k -> v
-                       -> State# RealWorld
-                       -> (# State# RealWorld, Weak# v #)
-
-This simplification tends to be good enough for GHCi uses given that there are
-few representation-polymorphic primops, and we do little simplification
-on interpreted code anyways.
-
-TODO: This behavior is actually wrong; a program becomes ill-typed upon
-replacing a real primop occurrence with one of its wrapper due to the fact that
-the former has an additional type binder. Hmmm....
-
+{- 
 Note [Eta expanding primops]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -702,16 +646,6 @@ return to the somewhat simpler eta expansion approach for unsaturated primops.
 
 See #18079.
 -}
-
--- | Returns the 'Id' of the wrapper associated with the given 'PrimOp'.
--- See Note [Primop wrappers].
-primOpWrapperId :: PrimOp -> Id
-primOpWrapperId op = mkVanillaGlobalWithInfo name ty info
-  where
-    info = setCafInfo vanillaIdInfo NoCafRefs
-    name = mkExternalName uniq gHC_PRIMOPWRAPPERS (primOpOcc op) wiredInSrcSpan
-    uniq = mkPrimOpWrapperUnique (primOpTag op)
-    ty   = primOpType op
 
 isComparisonPrimOp :: PrimOp -> Bool
 isComparisonPrimOp op = case primOpInfo op of

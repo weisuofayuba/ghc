@@ -869,7 +869,7 @@ findAndReadIface logger name_cache fc unit_state home_unit dflags doc_str mod wa
   -- See Note [GHC.Prim] in primops.txt.pp.
   -- TODO: make this check a function
   if mod `installedModuleEq` gHC_PRIM
-      then return (Succeeded (ghcPrimIface, "<built in interface for GHC.Prim>"))
+      then return (Succeeded (ghcPrimIface, "<built in interface for GHC.Prim>")) -- TODO
       else do
           -- Look for the file
           mb_found <- liftIO (findExactModule fc dflags unit_state home_unit mod)

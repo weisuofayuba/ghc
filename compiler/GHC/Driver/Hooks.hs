@@ -52,7 +52,6 @@ import GHC.Types.ForeignStubs
 
 import GHC.Unit.Module
 import GHC.Unit.Module.ModSummary
-import GHC.Unit.Module.ModIface
 import GHC.Unit.Home.ModInfo
 
 import GHC.Core

@@ -45,15 +45,12 @@ Library
         GHC.Debug
         GHC.Magic
         GHC.Magic.Dict
+        GHC.Prim
         GHC.Prim.Ext
         GHC.Prim.Panic
         GHC.Prim.Exception
-        GHC.PrimopWrappers
         GHC.Tuple
         GHC.Types
-
-    virtual-modules:
-        GHC.Prim
 
     -- OS Specific
     if os(windows)

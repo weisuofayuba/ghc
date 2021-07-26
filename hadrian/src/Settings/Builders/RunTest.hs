@@ -239,13 +239,13 @@ setTestSpeed TestFast   = "2"
 --   dealing with an in-tree compiler or not: we ask the GHC's install
 --   ghc-pkg to give us the library directory of its @ghc-prim@ package and
 --   look at what ways are available for the interface file of the
---   @GHC.PrimopWrappers@ module, like the Make build system does in
+--   @GHC.Types@ module, like the Make build system does in
 --   @testsuite\/mk\/test.mk@ to compute @HAVE_DYNAMIC@, @HAVE_VANILLA@
 --   and @HAVE_PROFILING@:
 --
---   - if we find @PrimopWrappers.hi@, we have the vanilla way;
---   - if we find @PrimopWrappers.dyn_hi@, we have the dynamic way;
---   - if we find @PrimopWrappers.p_hi@, we have the profiling way.
+--   - if we find @Types.hi@, we have the vanilla way;
+--   - if we find @Types.dyn_hi@, we have the dynamic way;
+--   - if we find @Types.p_hi@, we have the profiling way.
 inferLibraryWays :: String -> Action [Way]
 inferLibraryWays compiler = do
   bindir <- getBinaryDirectory compiler
@@ -261,9 +261,9 @@ inferLibraryWays compiler = do
           if exists then return (Just w) else return Nothing
 
         candidateWays =
-          [ ("GHC/PrimopWrappers.hi", vanilla)
-          , ("GHC/PrimopWrappers.dyn_hi", dynamic)
-          , ("GHC/PrimopWrappers.p_hi", profiling)
+          [ ("GHC/Types.hi", vanilla)
+          , ("GHC/Types.dyn_hi", dynamic)
+          , ("GHC/Types.p_hi", profiling)
           ]
 
         -- If the ghc is in a directory with spaces in a path component,
