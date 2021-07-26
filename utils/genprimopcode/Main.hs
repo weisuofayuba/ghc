@@ -109,14 +109,15 @@ desugarVectorSpec i              = case vecOptions i of
     conWidth con      = error $ "conWidth: unknown type constructor " ++ con ++ "\n"
 
 main :: IO ()
-main = getArgs >>= \args ->
-       if length args /= 1 || head args `notElem` known_args
-       then error ("usage: genprimopcode command < primops.txt > ...\n"
-                   ++ "   where command is one of\n"
-                   ++ unlines (map ("            "++) known_args)
-                  )
-       else
-       do s <- getContents
+main = do
+    args <- getArgs
+    if length args /= 1 || head args `notElem` known_args
+      then error ("usage: genprimopcode command < primops.txt > ...\n"
+                 ++ "   where command is one of\n"
+                 ++ unlines (map ("            "++) known_args)
+                 )
+      else do
+          s <- getContents
           case parse s of
              Left err -> error ("parse error at " ++ (show err))
              Right p_o_specs@(Info _ _)
@@ -213,7 +214,6 @@ known_args
        "--primop-vector-tycons",
        "--make-haskell-wrappers",
        "--make-haskell-source",
-       "--make-latex-doc",
        "--wired-in-docs"
      ]
 
@@ -229,36 +229,36 @@ gen_hs_source (Info defaults entries) =
     ++ "consumed by haddock.\n"
     ++ "-}\n"
     ++ "\n"
-        ++ (replicate 77 '-' ++ "\n") -- For 80-col cleanliness
-        ++ "-- |\n"
-        ++ "-- Module      :  GHC.Prim\n"
-        ++ "-- \n"
-        ++ "-- Maintainer  :  ghc-devs@haskell.org\n"
-        ++ "-- Stability   :  internal\n"
-        ++ "-- Portability :  non-portable (GHC extensions)\n"
-        ++ "--\n"
-        ++ "-- GHC\'s primitive types and operations.\n"
-        ++ "-- Use GHC.Exts from the base package instead of importing this\n"
-        ++ "-- module directly.\n"
-        ++ "--\n"
-        ++ (replicate 77 '-' ++ "\n") -- For 80-col cleanliness
-        ++ "{-# LANGUAGE Unsafe #-}\n"
-        ++ "{-# LANGUAGE MagicHash #-}\n"
-        ++ "{-# LANGUAGE MultiParamTypeClasses #-}\n"
-        ++ "{-# LANGUAGE NoImplicitPrelude #-}\n"
-        ++ "{-# LANGUAGE UnboxedTuples #-}\n"
-        ++ "{-# LANGUAGE NegativeLiterals #-}\n"
+    ++ (replicate 77 '-' ++ "\n") -- For 80-col cleanliness
+    ++ "-- |\n"
+    ++ "-- Module      :  GHC.Prim\n"
+    ++ "-- \n"
+    ++ "-- Maintainer  :  ghc-devs@haskell.org\n"
+    ++ "-- Stability   :  internal\n"
+    ++ "-- Portability :  non-portable (GHC extensions)\n"
+    ++ "--\n"
+    ++ "-- GHC\'s primitive types and operations.\n"
+    ++ "-- Use GHC.Exts from the base package instead of importing this\n"
+    ++ "-- module directly.\n"
+    ++ "--\n"
+    ++ (replicate 77 '-' ++ "\n") -- For 80-col cleanliness
+    ++ "{-# LANGUAGE Unsafe #-}\n"
+    ++ "{-# LANGUAGE MagicHash #-}\n"
+    ++ "{-# LANGUAGE MultiParamTypeClasses #-}\n"
+    ++ "{-# LANGUAGE NoImplicitPrelude #-}\n"
+    ++ "{-# LANGUAGE UnboxedTuples #-}\n"
+    ++ "{-# LANGUAGE NegativeLiterals #-}\n"
 
-        ++ "{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}\n"
-                -- We generate a binding for coerce, like
-                --   coerce :: Coercible a b => a -> b
-                --   coerce = let x = x in x
-                -- and we don't want a complaint that the constraint is redundant
-                -- Remember, this silly file is only for Haddock's consumption
+    ++ "{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}\n"
+            -- We generate a binding for coerce, like
+            --   coerce :: Coercible a b => a -> b
+            --   coerce = let x = x in x
+            -- and we don't want a complaint that the constraint is redundant
+            -- Remember, this silly file is only for Haddock's consumption
 
-        ++ "module GHC.Prim (\n"
-        ++ unlines (map (("        " ++) . hdr) entries')
-        ++ ") where\n"
+    ++ "module GHC.Prim (\n"
+    ++ unlines (map (("        " ++) . hdr) entries')
+    ++ ") where\n"
     ++ "\n"
     ++ "{-\n"
         ++ unlines (map opt defaults)
@@ -279,105 +279,108 @@ gen_hs_source (Info defaults entries) =
        -- Now the main payload
     ++ "\n" ++ unlines (concatMap ent entries') ++ "\n\n\n"
 
-     where entries' = concatMap desugarVectorSpec entries
+  where
+    entries' = concatMap desugarVectorSpec entries
 
-           opt (OptionFalse n)    = n ++ " = False"
-           opt (OptionTrue n)     = n ++ " = True"
-           opt (OptionString n v) = n ++ " = { " ++ v ++ "}"
-           opt (OptionInteger n v) = n ++ " = " ++ show v
-           opt (OptionVector _)    = ""
-           opt (OptionFixity mf) = "fixity" ++ " = " ++ show mf
+    opt (OptionFalse n)    = n ++ " = False"
+    opt (OptionTrue n)     = n ++ " = True"
+    opt (OptionString n v) = n ++ " = { " ++ v ++ "}"
+    opt (OptionInteger n v) = n ++ " = " ++ show v
+    opt (OptionVector _)    = ""
+    opt (OptionFixity mf) = "fixity" ++ " = " ++ show mf
 
-           hdr s@(Section {})                                    = sec s
-           hdr (PrimOpSpec { name = n })                         = wrapOp n ++ ","
-           hdr (PrimVecOpSpec { name = n })                      = wrapOp n ++ ","
-           hdr (PseudoOpSpec { name = n })                       = wrapOp n ++ ","
-           hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = wrapOp n ++ ","
-           hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
-           hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = wrapOp n ++ ","
-           hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
+    hdr s@(Section {})                                    = sec s
+    hdr (PrimOpSpec { name = n })                         = wrapOp n ++ ","
+    hdr (PrimVecOpSpec { name = n })                      = wrapOp n ++ ","
+    hdr (PseudoOpSpec { name = n })                       = wrapOp n ++ ","
+    hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = wrapOp n ++ ","
+    hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
+    hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = wrapOp n ++ ","
+    hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
 
-           sec s = "\n-- * " ++ escape (title s) ++ "\n"
-                    ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ desc s)
+    sec s = "\n-- * " ++ escape (title s) ++ "\n"
+             ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ desc s)
 
 
-           ent   (Section {})         = []
-           ent o@(PrimOpSpec {})      = spec o
-           ent o@(PrimVecOpSpec {})   = spec o
-           ent o@(PrimTypeSpec {})    = spec o
-           ent o@(PrimVecTypeSpec {}) = spec o
-           ent o@(PseudoOpSpec {})    = spec o
+    ent   (Section {})         = []
+    ent o@(PrimOpSpec {})      = spec o
+    ent o@(PrimVecOpSpec {})   = spec o
+    ent o@(PrimTypeSpec {})    = spec o
+    ent o@(PrimVecTypeSpec {}) = spec o
+    ent o@(PseudoOpSpec {})    = spec o
 
-           spec o = ([ "" ] ++) . concat $
-             -- Doc comments
-             [ case unlatex (escape (desc o)) ++ extra (opts o) of
-                 "" -> []
-                 cmmt -> map ("-- " ++) $ lines $ "|" ++ cmmt
+    spec o = ([ "" ] ++) . concat $
+      -- Doc comments
+      [ case unlatex (escape (desc o)) ++ extra (opts o) of
+          "" -> []
+          cmmt -> map ("-- " ++) $ lines $ "|" ++ cmmt
 
-             -- Deprecations
-             , [ d | Just n <- [getName o], d <- prim_deprecated (opts o) n ]
+      -- Deprecations
+      , [ d | Just n <- [getName o], d <- prim_deprecated (opts o) n ]
 
-             -- Fixity
-             , [ f | Just n <- [getName o], f <- prim_fixity (opts o) n ]
+      -- Fixity
+      , [ f | Just n <- [getName o], f <- prim_fixity (opts o) n ]
 
-             -- Declarations (see Note [Placeholder declarations])
-             , case o of
-                 PrimOpSpec { name = n, ty = t }    -> prim_func n t
-                 PrimVecOpSpec { name = n, ty = t } -> prim_func n t
-                 PseudoOpSpec { name = n, ty = t }  -> prim_func n t
-                 PrimTypeSpec { ty = t }    -> prim_data t
-                 PrimVecTypeSpec { ty = t } -> prim_data t
-                 Section { } -> error "Section is not an entity"
-             ]
+      -- Declarations (see Note [Placeholder declarations])
+      , case o of
+          PrimOpSpec { name = n, ty = t }    -> prim_func n t
+          PrimVecOpSpec { name = n, ty = t } -> prim_func n t
+          PseudoOpSpec { name = n, ty = t }  -> prim_func n t
+          PrimTypeSpec { ty = t }    -> prim_data t
+          PrimVecTypeSpec { ty = t } -> prim_data t
+          Section { } -> error "Section is not an entity"
+      ]
 
-           extra options = case on_llvm_only options ++ can_fail options of
-             [m1,m2] -> "\n\n__/Warning:/__ this " ++ m1 ++ " and " ++ m2 ++ "."
-             [m] -> "\n\n__/Warning:/__ this " ++ m ++ "."
-             _ -> ""
+    extra options = case on_llvm_only options ++ can_fail options of
+      [m1,m2] -> "\n\n__/Warning:/__ this " ++ m1 ++ " and " ++ m2 ++ "."
+      [m] -> "\n\n__/Warning:/__ this " ++ m ++ "."
+      _ -> ""
 
-           on_llvm_only options
-             = [ "is only available on LLVM"
-               | Just (OptionTrue _) <- [lookup_attrib "llvm_only" options] ]
+    on_llvm_only options
+      = [ "is only available on LLVM"
+        | Just (OptionTrue _) <- [lookup_attrib "llvm_only" options] ]
 
-           can_fail options
-             = [ "can fail with an unchecked exception"
-               | Just (OptionTrue _) <- [lookup_attrib "can_fail" options] ]
+    can_fail options
+      = [ "can fail with an unchecked exception"
+        | Just (OptionTrue _) <- [lookup_attrib "can_fail" options] ]
 
-           prim_deprecated options n
-              = [ "{-# DEPRECATED " ++ wrapOp n ++ " \"" ++ msg ++ "\" #-}"
-                | Just (OptionString _ msg)
-                    <- [lookup_attrib "deprecated_msg" options] ]
+    prim_deprecated options n
+       = [ "{-# DEPRECATED " ++ wrapOp n ++ " \"" ++ msg ++ "\" #-}"
+         | Just (OptionString _ msg)
+             <- [lookup_attrib "deprecated_msg" options] ]
 
-           prim_fixity options n
-              = [ pprFixityDir d ++ " " ++ show i ++ " " ++ asInfix n
-                | OptionFixity (Just (Fixity _ i d)) <- options ]
+    prim_fixity options n
+       = [ pprFixityDir d ++ " " ++ show i ++ " " ++ asInfix n
+         | OptionFixity (Just (Fixity _ i d)) <- options ]
 
-           prim_func n t = [ wrapOp n ++ " :: " ++ pprTy t,
-                             wrapOp n ++ " = " ++ funcRhs n ]
+    prim_func n t = [ wrapOp n ++ " :: " ++ pprTy t,
+                      wrapOp n ++ " = " ++ funcRhs n ]
 
-           funcRhs "tagToEnum#" = "let x = x in x"
-           funcRhs nm           = wrapOp nm
-              -- Special case for tagToEnum#: see Note [Placeholder declarations]
+    funcRhs "tagToEnum#" = "let x = x in x"
+    funcRhs nm           = wrapOp nm
+       -- Special case for tagToEnum#: see Note [Placeholder declarations]
 
-           prim_data t = [ "data " ++ pprTy t ]
+    prim_data t = [ "data " ++ pprTy t ]
 
-           escape = concatMap (\c -> if c `elem` special then '\\':c:[] else c:[])
-                where special = "/'`\"@<"
+    escape = concatMap (\c -> if c `elem` special then '\\':c:[] else c:[])
+         where special = "/'`\"@<"
 
 unlatex :: String -> String
 unlatex s = case s of
-  '\\':'t':'e':'x':'t':'t':'t':'{':cs -> markup "@" "@" cs
-  '{':'\\':'t':'e':'x':'t':'t':'t':' ':cs -> markup "@" "@" cs
-  '{':'\\':'t':'t':cs -> markup "@" "@" cs
-  '{':'\\':'i':'t':cs -> markup "/" "/" cs
-  '{':'\\':'e':'m':cs -> markup "/" "/" cs
-  c : cs -> c : unlatex cs
-  "" -> ""
-  where markup b e xs = b ++ mk (dropWhile isSpace xs)
-          where mk ""        = e
-                mk ('\n':cs) = ' ' : mk cs
-                mk ('}':cs)  = e ++ unlatex cs
-                mk (c:cs)    = c : mk cs
+    '\\':'t':'e':'x':'t':'t':'t':'{':cs -> markup "@" "@" cs
+    '{':'\\':'t':'e':'x':'t':'t':'t':' ':cs -> markup "@" "@" cs
+    '{':'\\':'t':'t':cs -> markup "@" "@" cs
+    '{':'\\':'i':'t':cs -> markup "/" "/" cs
+    '{':'\\':'e':'m':cs -> markup "/" "/" cs
+    c : cs -> c : unlatex cs
+    "" -> ""
+  where
+    markup b e xs = b ++ mk (dropWhile isSpace xs)
+      where
+        mk ""        = e
+        mk ('\n':cs) = ' ' : mk cs
+        mk ('}':cs)  = e ++ unlatex cs
+        mk (c:cs)    = c : mk cs
 
 -- | Extract a string representation of the name
 getName :: Entry -> Maybe String
@@ -410,19 +413,19 @@ RHS we would get other complaints (e.g.can't unify "*" with "#").
 -- | "Pretty"-print a type
 pprTy :: Ty -> String
 pprTy = pty
-    where
-          pty (TyF t1 t2) = pbty t1 ++ " -> " ++ pty t2
-          pty (TyC t1 t2) = pbty t1 ++ " => " ++ pty t2
-          pty t      = pbty t
+  where
+    pty (TyF t1 t2) = pbty t1 ++ " -> " ++ pty t2
+    pty (TyC t1 t2) = pbty t1 ++ " => " ++ pty t2
+    pty t      = pbty t
 
-          pbty (TyApp tc ts) = unwords (wrapOp (show tc) : map paty ts)
-          pbty (TyUTup ts)   = "(# "
-                            ++ concat (intersperse "," (map pty ts))
-                            ++ " #)"
-          pbty t             = paty t
+    pbty (TyApp tc ts) = unwords (wrapOp (show tc) : map paty ts)
+    pbty (TyUTup ts)   = "(# "
+                          ++ concat (intersperse "," (map pty ts))
+                          ++ " #)"
+    pbty t             = paty t
 
-          paty (TyVar tv)    = tv
-          paty t             = "(" ++ pty t ++ ")"
+    paty (TyVar tv)    = tv
+    paty t             = "(" ++ pty t ++ ")"
 
 -- | Turn an identifier or operator into its prefix form
 wrapOp :: String -> String
@@ -505,22 +508,20 @@ gen_wrappers (Info _ entries)
               _                   -> False
 
 gen_primop_list :: Info -> String
-gen_primop_list (Info _ entries)
-   = unlines (
-        [      "   [" ++ cons first       ]
-        ++
-        map (\p -> "   , " ++ cons p) rest
-        ++
-        [     "   ]"     ]
-     ) where (first:rest) = concatMap desugarVectorSpec (filter is_primop entries)
+gen_primop_list (Info _ entries) =
+    unlines $ map ("    " ++) $
+        [ "[" ++ cons first ] ++
+        [ ", " ++ cons p | p <- rest ] ++
+        [ "]" ]
+  where
+    first:rest = concatMap desugarVectorSpec (filter is_primop entries)
 
 mIN_VECTOR_UNIQUE :: Int
 mIN_VECTOR_UNIQUE = 300
 
 gen_primop_vector_uniques :: Info -> String
-gen_primop_vector_uniques (Info _ entries)
-   = unlines $
-     concatMap mkVecUnique (specs `zip` [mIN_VECTOR_UNIQUE..])
+gen_primop_vector_uniques (Info _ entries) =
+    unlines $ concatMap mkVecUnique (specs `zip` [mIN_VECTOR_UNIQUE..])
   where
     specs = concatMap desugarVectorSpec (filter is_vector (filter is_primtype entries))
 
@@ -533,9 +534,8 @@ gen_primop_vector_uniques (Info _ entries)
         key_id = prefix i ++ "PrimTyConKey"
 
 gen_primop_vector_tys :: Info -> String
-gen_primop_vector_tys (Info _ entries)
-   = unlines $
-     concatMap mkVecTypes specs
+gen_primop_vector_tys (Info _ entries) =
+    unlines $ concatMap mkVecTypes specs
   where
     specs = concatMap desugarVectorSpec (filter is_vector (filter is_primtype entries))
 
@@ -556,9 +556,8 @@ gen_primop_vector_tys (Info _ entries)
         tycon_id = prefix i ++ "PrimTyCon"
 
 gen_primop_vector_tys_exports :: Info -> String
-gen_primop_vector_tys_exports (Info _ entries)
-   = unlines $
-    map mkVecTypes specs
+gen_primop_vector_tys_exports (Info _ entries) =
+    unlines $ map mkVecTypes specs
   where
     specs = concatMap desugarVectorSpec (filter is_vector (filter is_primtype entries))
 
@@ -570,9 +569,8 @@ gen_primop_vector_tys_exports (Info _ entries)
         tycon_id = prefix i ++ "PrimTyCon"
 
 gen_primop_vector_tycons :: Info -> String
-gen_primop_vector_tycons (Info _ entries)
-   = unlines $
-     map mkVecTypes specs
+gen_primop_vector_tycons (Info _ entries) =
+    unlines $ map mkVecTypes specs
   where
     specs = concatMap desugarVectorSpec (filter is_vector (filter is_primtype entries))
 
@@ -583,15 +581,15 @@ gen_primop_vector_tycons (Info _ entries)
         tycon_id = prefix i ++ "PrimTyCon"
 
 gen_primop_tag :: Info -> String
-gen_primop_tag (Info _ entries)
-   = unlines (max_def_type : max_def :
-              tagOf_type : zipWith f primop_entries [1 :: Int ..])
-     where
-        primop_entries = concatMap desugarVectorSpec $ filter is_primop entries
-        tagOf_type = "primOpTag :: PrimOp -> Int"
-        f i n = "primOpTag " ++ cons i ++ " = " ++ show n
-        max_def_type = "maxPrimOpTag :: Int"
-        max_def      = "maxPrimOpTag = " ++ show (length primop_entries)
+gen_primop_tag (Info _ entries) =
+    unlines $ [ max_def_type, max_def
+              , tagOf_type ] ++ zipWith f primop_entries [1 :: Int ..]
+  where
+    primop_entries = concatMap desugarVectorSpec $ filter is_primop entries
+    tagOf_type = "primOpTag :: PrimOp -> Int"
+    f i n = "primOpTag " ++ cons i ++ " = " ++ show n
+    max_def_type = "maxPrimOpTag :: Int"
+    max_def      = "maxPrimOpTag = " ++ show (length primop_entries)
 
 gen_data_decl :: Info -> String
 gen_data_decl (Info _ entries) =
@@ -611,19 +609,19 @@ gen_switch_from_attribs attrib_name fn_name (Info defaults entries)
    = let defv = lookup_attrib attrib_name defaults
          alternatives = catMaybes (map mkAlt (filter is_primop entries))
 
-         getAltRhs (OptionFalse _)    = "False"
-         getAltRhs (OptionTrue _)     = "True"
+         getAltRhs (OptionFalse _)     = "False"
+         getAltRhs (OptionTrue _)      = "True"
          getAltRhs (OptionInteger _ i) = show i
-         getAltRhs (OptionString _ s) = s
-         getAltRhs (OptionVector _) = "True"
-         getAltRhs (OptionFixity mf) = show mf
+         getAltRhs (OptionString _ s)  = s
+         getAltRhs (OptionVector _)    = "True"
+         getAltRhs (OptionFixity mf)   = show mf
 
-         mkAlt po
-            = case lookup_attrib attrib_name (opts po) of
+         mkAlt po =
+             case lookup_attrib attrib_name (opts po) of
                  Nothing -> Nothing
                  Just xx -> case vecOptions po of
-                              [] -> Just (fn_name ++ " " ++ cons po ++ " = " ++ getAltRhs xx)
-                              _  -> Just (fn_name ++ " (" ++ cons po ++ " _ _ _) = " ++ getAltRhs xx)
+                                [] -> Just (fn_name ++ " " ++ cons po ++ " = " ++ getAltRhs xx)
+                                _  -> Just (fn_name ++ " (" ++ cons po ++ " _ _ _) = " ++ getAltRhs xx)
 
      in
          case defv of
@@ -649,12 +647,14 @@ because mapping names to "Name"s is difficult for things like primtypes and
 pseudoops.
 -}
 gen_wired_in_docs :: Info -> String
-gen_wired_in_docs (Info _ entries)
-  = "primOpDocs =\n  [ " ++ intercalate "\n  , " (catMaybes $ map mkDoc $ concatMap desugarVectorSpec entries) ++ "\n  ]\n"
-    where
-      mkDoc po | Just poName <- getName po
-               , not $ null $ desc po = Just $ show (poName, unlatex $ desc po)
-               | otherwise = Nothing
+gen_wired_in_docs (Info _ entries) =
+    "primOpDocs =\n" ++
+    "  [ " ++ intercalate "\n  , " (catMaybes $ map mkDoc $ concatMap desugarVectorSpec entries) ++ "\n" ++
+    "  ]\n"
+  where
+    mkDoc po | Just poName <- getName po
+             , not $ null $ desc po = Just $ show (poName, unlatex $ desc po)
+             | otherwise = Nothing
 
 ------------------------------------------------------------------
 -- Create PrimOpInfo text from PrimOpSpecs -----------------------
