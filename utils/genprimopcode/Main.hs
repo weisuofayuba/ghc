@@ -286,10 +286,6 @@ gen_hs_source (Info defaults entries) =
   where
     entries' = concatMap desugarVectorSpec entries
 
-    imp_tycons =
-        filter (`notElem` [TyCon "()", TyCon "Bool"])
-        $ foldr union [] $ map (tyconsIn . ty) $ filter is_primop entries
-
     opt :: Option -> String
     opt (OptionFalse n)    = n ++ " = False"
     opt (OptionTrue n)     = n ++ " = True"
@@ -297,20 +293,6 @@ gen_hs_source (Info defaults entries) =
     opt (OptionInteger n v) = n ++ " = " ++ show v
     opt (OptionVector _)    = ""
     opt (OptionFixity mf) = "fixity" ++ " = " ++ show mf
-
-    hdr :: Entry -> String
-    hdr s@(Section {})                                    = sec s
-    hdr (PrimOpSpec { name = n })                         = wrapOp n ++ ","
-    hdr (PrimVecOpSpec { name = n })                      = wrapOp n ++ ","
-    hdr (PseudoOpSpec { name = n })                       = ""
-    hdr (PrimTypeSpec { ty = TyApp (TyCon n) _ })         = wrapOp n ++ ","
-    hdr (PrimTypeSpec {})                                 = error $ "Illegal type spec"
-    hdr (PrimVecTypeSpec { ty = TyApp (VecTyCon n _) _ }) = wrapOp n ++ ","
-    hdr (PrimVecTypeSpec {})                              = error $ "Illegal type spec"
-
-    sec s = "\n-- * " ++ escape (title s) ++ "\n"
-             ++ (unlines $ map ("-- " ++ ) $ lines $ unlatex $ escape $ "|" ++ desc s)
-
 
     entry :: Entry -> [String]
     entry   (Section {})         = []
@@ -331,7 +313,7 @@ gen_hs_source (Info defaults entries) =
       , case ent of
           PrimOpSpec { name = n, ty = t }    -> prim_func n t (isLlvmOnly ent)
           PrimVecOpSpec { name = n, ty = t } -> prim_func n t (isLlvmOnly ent)
-          PseudoOpSpec { name = n, ty = t }  -> []
+          PseudoOpSpec { }                   -> []
           PrimTypeSpec { ty = t }            -> prim_data t
           PrimVecTypeSpec { ty = t }         -> prim_data t
             -- N.B. We can't generate any data types as otherwise the

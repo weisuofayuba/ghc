@@ -77,8 +77,6 @@ import GHC.Types.Unique.FM      ( pprUniqFM )
 
 import Data.List (mapAccumL)
 
-import GHC.Utils.Trace( pprTrace )
-
 {-
 ************************************************************************
 *                                                                      *
