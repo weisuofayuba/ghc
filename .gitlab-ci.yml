@@ -468,7 +468,7 @@ lint-libs:
 #################################
 
 .build-x86_64-freebsd:
-  stage: full-build
+  stage: tool-lint
   extends: .validate
   tags:
     - x86_64-freebsd12
