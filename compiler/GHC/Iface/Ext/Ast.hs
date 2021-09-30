@@ -396,8 +396,7 @@ getRealSpan :: SrcSpan -> Maybe Span
 getRealSpan (RealSrcSpan sp _) = Just sp
 getRealSpan _ = Nothing
 
-grhss_span :: (Anno (GRHS (GhcPass p) (LocatedA (body (GhcPass p)))) ~ SrcSpan
-              , Data (HsLocalBinds (GhcPass p)))
+grhss_span :: (Anno (GRHS (GhcPass p) (LocatedA (body (GhcPass p)))) ~ SrcSpan)
            => GRHSs (GhcPass p) (LocatedA (body (GhcPass p))) -> SrcSpan
 grhss_span (GRHSs _ xs bs) = foldl' combineSrcSpans (spanHsLocaLBinds bs) (map getLoc xs)
 
@@ -781,29 +780,9 @@ data HiePassEv p where
   HieRn :: HiePassEv 'Renamed
   HieTc :: HiePassEv 'Typechecked
 
-class ( IsPass p
-      , HiePass (NoGhcTcPass p)
+class ( IsPass p, Typeable p, NoGhcTcPass p ~ 'Renamed
       , ModifyState (IdGhcP p)
-      , Data (GRHS  (GhcPass p) (LocatedA (HsExpr (GhcPass p))))
-      , Data (Match (GhcPass p) (LocatedA (HsExpr (GhcPass p))))
-      , Data (Match (GhcPass p) (LocatedA (HsCmd  (GhcPass p))))
-      , Data (Stmt  (GhcPass p) (LocatedA (HsExpr (GhcPass p))))
-      , Data (Stmt  (GhcPass p) (LocatedA (HsCmd  (GhcPass p))))
-      , Data (HsExpr (GhcPass p))
-      , Data (HsCmd  (GhcPass p))
-      , Data (AmbiguousFieldOcc (GhcPass p))
-      , Data (HsCmdTop (GhcPass p))
-      , Data (GRHS (GhcPass p) (LocatedA (HsCmd (GhcPass p))))
-      , Data (HsSplice (GhcPass p))
-      , Data (HsLocalBinds (GhcPass p))
-      , Data (FieldOcc (GhcPass p))
-      , Data (HsTupArg (GhcPass p))
-      , Data (IPBind (GhcPass p))
       , ToHie (Context (Located (IdGhcP p)))
-      , ToHie (RFContext (Located (AmbiguousFieldOcc (GhcPass p))))
-      , ToHie (RFContext (Located (FieldOcc (GhcPass p))))
-      , ToHie (TScoped (LHsWcType (GhcPass (NoGhcTcPass p))))
-      , ToHie (TScoped (LHsSigWcType (GhcPass (NoGhcTcPass p))))
       , Anno (IdGhcP p) ~ SrcSpanAnnN
       )
       => HiePass p where
@@ -825,13 +804,7 @@ type AnnoBody p body
     , Anno (GRHS (GhcPass p) (LocatedA (body (GhcPass p))))
                    ~ SrcSpan
     , Anno (StmtLR (GhcPass p) (GhcPass p) (LocatedA (body (GhcPass p)))) ~ SrcSpanAnnA
-
     , Data (body (GhcPass p))
-    , Data (Match (GhcPass p) (LocatedA (body (GhcPass p))))
-    , Data (GRHS  (GhcPass p) (LocatedA (body (GhcPass p))))
-    , Data (Stmt  (GhcPass p) (LocatedA (body (GhcPass p))))
-
-    , IsPass p
     )
 
 instance HiePass p => ToHie (BindContext (LocatedA (HsBind (GhcPass p)))) where
@@ -916,21 +889,16 @@ instance HiePass p => ToHie (HsPatSynDir (GhcPass p)) where
     _ -> pure []
 
 instance ( HiePass p
-         , Data (body (GhcPass p))
          , AnnoBody p body
          , ToHie (LocatedA (body (GhcPass p)))
          ) => ToHie (LocatedA (Match (GhcPass p) (LocatedA (body (GhcPass p))))) where
-  toHie (L span m ) = concatM $ node : case m of
+  toHie (L span m ) = concatM $ makeNodeA m span : case m of
     Match{m_ctxt=mctx, m_pats = pats, m_grhss =  grhss } ->
       [ toHie mctx
       , let rhsScope = mkScope $ grhss_span grhss
           in toHie $ patScopes Nothing rhsScope NoScope pats
       , toHie grhss
       ]
-    where
-      node = case hiePass @p of
-        HieTc -> makeNodeA m span
-        HieRn -> makeNodeA m span
 
 instance HiePass p => ToHie (HsMatchContext (GhcPass p)) where
   toHie (FunRhs{mc_fun=name}) = toHie $ C MatchBind name'
@@ -1035,8 +1003,8 @@ instance HiePass p => ToHie (PScoped (LocatedA (Pat (GhcPass p)))) where
               ]
             ExpansionPat _ p -> [ toHie $ PS rsp scope pscope (L ospan p) ]
     where
-      contextify :: a ~ LPat (GhcPass p) => HsConDetails (HsPatSigType (NoGhcTc (GhcPass p))) a (HsRecFields (GhcPass p) a)
-                 -> HsConDetails (TScoped (HsPatSigType (NoGhcTc (GhcPass p)))) (PScoped a) (RContext (HsRecFields (GhcPass p) (PScoped a)))
+      contextify :: a ~ LPat (GhcPass p) => HsConDetails (HsPatSigType GhcRn) a (HsRecFields (GhcPass p) a)
+                 -> HsConDetails (TScoped (HsPatSigType GhcRn)) (PScoped a) (RContext (HsRecFields (GhcPass p) (PScoped a)))
       contextify (PrefixCon tyargs args) = PrefixCon (tScopes scope argscope tyargs) (patScopes rsp scope pscope args)
         where argscope = foldr combineScopes NoScope $ map mkLScopeA args
       contextify (InfixCon a b) = InfixCon a' b'
@@ -1071,15 +1039,11 @@ instance ( ToHie (LocatedA (body (GhcPass p)))
          , HiePass p
          , AnnoBody p body
          ) => ToHie (Located (GRHS (GhcPass p) (LocatedA (body (GhcPass p))))) where
-  toHie (L span g) = concatM $ node : case g of
+  toHie (L span g) = concatM $ makeNode g span : case g of
     GRHS _ guards body ->
       [ toHie $ listScopes (mkLScopeA body) guards
       , toHie body
       ]
-    where
-      node = case hiePass @p of
-        HieRn -> makeNode g span
-        HieTc -> makeNode g span
 
 instance HiePass p => ToHie (LocatedA (HsExpr (GhcPass p))) where
   toHie e@(L mspan oexpr) = concatM $ getTypeNode e : case oexpr of
@@ -1236,7 +1200,7 @@ instance ( ToHie (LocatedA (body (GhcPass p)))
          , AnnoBody p body
          , HiePass p
          ) => ToHie (RScoped (LocatedA (Stmt (GhcPass p) (LocatedA (body (GhcPass p)))))) where
-  toHie (RS scope (L span stmt)) = concatM $ node : case stmt of
+  toHie (RS scope (L span stmt)) = concatM $ makeNodeA stmt span : case stmt of
       LastStmt _ body _ _ ->
         [ toHie body
         ]
@@ -1266,10 +1230,6 @@ instance ( ToHie (LocatedA (body (GhcPass p)))
       RecStmt {recS_stmts = L _ stmts} ->
         [ toHie $ map (RS $ combineScopes scope (mkScope (locA span))) stmts
         ]
-    where
-      node = case hiePass @p of
-        HieTc -> makeNodeA stmt span
-        HieRn -> makeNodeA stmt span
 
 instance HiePass p => ToHie (RScoped (HsLocalBinds (GhcPass p))) where
   toHie (RS scope binds) = concatM $ makeNode binds (spanHsLocaLBinds binds) : case binds of
@@ -1349,34 +1309,21 @@ instance ( ToHie (RFContext label)
       , toHie expr
       ]
 
-instance ToHie (RFContext (Located (FieldOcc GhcRn))) where
-  toHie (RFC c rhs (L nspan f)) = concatM $ case f of
-    FieldOcc name _ ->
-      [ toHie $ C (RecField c rhs) (L nspan name)
-      ]
+instance HiePass p => ToHie (RFContext (Located (FieldOcc (GhcPass p)))) where
+  toHie (RFC c rhs (L nspan f)) = case hiePass @p of
+    HieRn -> concatM $ case f of
+      FieldOcc name _ -> [toHie $ C (RecField c rhs) (L nspan name)]
+    HieTc -> concatM $ case f of
+      FieldOcc var  _ -> [toHie $ C (RecField c rhs) (L nspan var)]
 
-instance ToHie (RFContext (Located (FieldOcc GhcTc))) where
-  toHie (RFC c rhs (L nspan f)) = concatM $ case f of
-    FieldOcc var _ ->
-      [ toHie $ C (RecField c rhs) (L nspan var)
-      ]
-
-instance ToHie (RFContext (Located (AmbiguousFieldOcc GhcRn))) where
-  toHie (RFC c rhs (L nspan afo)) = concatM $ case afo of
-    Unambiguous name _ ->
-      [ toHie $ C (RecField c rhs) $ L nspan name
-      ]
-    Ambiguous _name _ ->
-      [ ]
-
-instance ToHie (RFContext (Located (AmbiguousFieldOcc GhcTc))) where
-  toHie (RFC c rhs (L nspan afo)) = concatM $ case afo of
-    Unambiguous var _ ->
-      [ toHie $ C (RecField c rhs) (L nspan var)
-      ]
-    Ambiguous var _ ->
-      [ toHie $ C (RecField c rhs) (L nspan var)
-      ]
+instance HiePass p => ToHie (RFContext (Located (AmbiguousFieldOcc (GhcPass p)))) where
+  toHie (RFC c rhs (L nspan afo)) = case hiePass @p of
+    HieRn -> concatM $ case afo of
+      Unambiguous name _ -> [toHie $ C (RecField c rhs) $ L nspan name]
+      Ambiguous  _name _ -> [ ]
+    HieTc -> concatM $ case afo of
+      Unambiguous var _ -> [toHie $ C (RecField c rhs) (L nspan var)]
+      Ambiguous   var _ -> [toHie $ C (RecField c rhs) (L nspan var)]
 
 instance HiePass p => ToHie (RScoped (ApplicativeArg (GhcPass p))) where
   toHie (RS sc (ApplicativeArgOne _ pat expr _)) = concatM
