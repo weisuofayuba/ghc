@@ -1345,6 +1345,13 @@ void freeObjectCode (ObjectCode *oc)
 {
     IF_DEBUG(linker, debugBelch("freeObjectCode: %s", oc->fileName));
 
+    // Run finalizers
+#if defined(OBJFORMAT_ELF)
+    if (oc->sections != NULL) {
+        ocRunFini_ELF(oc);
+    }
+#endif
+
     if (oc->type == DYNAMIC_OBJECT) {
 #if defined(OBJFORMAT_ELF)
         ACQUIRE_LOCK(&dl_mutex);

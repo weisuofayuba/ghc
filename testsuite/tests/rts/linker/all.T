@@ -117,3 +117,6 @@ test('T7072',
 		unless(opsys('linux'), skip), 
 		req_rts_linker], 
 	makefile_test, ['T7072'])
+test('T20494',
+     [req_rts_linker],
+    makefile_test, ['T20494'])
