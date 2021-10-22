@@ -3,11 +3,21 @@ name: rts
 version: 1.0.2
 license: BSD-3-Clause
 maintainer: glasgow-haskell-users@haskell.org
-build-type: Simple
+build-type: Configure
+description:
+    The run-time system for code produced by GHC.
 
 extra-source-files:
+  configure
+  configure.ac
   -- This file needs to be in the package but shouldn't be compiled on its own.
   xxhash.c
+
+extra-tmp-files:
+  autom4te.cache
+  rts.buildinfo
+  config.log
+  config.status
 
 flag libm
   default: @CabalHaveLibm@
@@ -153,6 +163,7 @@ library
                   @FFIIncludeDir@
                   @LibdwIncludeDir@
     includes: Rts.h
+    autogen-includes: ghcautoconf.h
     install-includes: Cmm.h HsFFI.h MachDeps.h Rts.h RtsAPI.h Stg.h
                       ghcautoconf.h ghcconfig.h ghcplatform.h ghcversion.h
                       -- ^ from include

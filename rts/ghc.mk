@@ -112,6 +112,34 @@ rts/dist-install/libs.depend : $$(ghc-pkg_INPLACE) | $$(dir $$@)/.
 	"$(ghc-pkg_INPLACE)" --simple-output field rts library-dirs \
 	  | sed -e 's/\([^ ][^ ]*\)/-L\1/g' >> $@
 
+# -----------------------------------------------------------------------------
+# Run the configure script
+
+ifneq "$(BINDIST)" "YES"
+
+# Ensure these files are all accounted for elsewhere, e.g. ghcautoconf.h is in
+# `includes_dist-install_H_FILES`. `rts_dist-install_depfile_c_asm`, which I
+# this is the earliest use of the header, depends on on
+# `includes_dist-install_H_FILES`, so the configure script is properly run when
+# needed.
+rts_dist-install_CONFIGURE_GENERATED_FILES = \
+	rts/dist-install/build/include/ghcautoconf.h
+
+rts_dist-install_PKGDATA = rts/dist-install/package-data.mk
+
+$(rts_dist-install_CONFIGURE_GENERATED_FILES): $(rts_dist-install_PKGDATA)
+
+# configure doesn't actually make this file, but we need a single file to
+# factor the deps in so configure isn't run twice, and this seems like a fine
+# choice for the task. Maybe in the future we will indeed actually use
+# ghc-cabal for consistency.
+$(rts_dist-install_PKGDATA): rts/configure
+	cd rts/dist-install/build ; ../../configure \
+		--build=$(BUILDPLATFORM) \
+		--host=$(TARGETPLATFORM)
+	touch $@
+
+endif
 
 # ----------------------------------------------------------------------------
 # On Windows, as the RTS and base libraries have recursive imports,
