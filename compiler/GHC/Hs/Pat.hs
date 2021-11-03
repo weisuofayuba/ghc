@@ -38,7 +38,7 @@ module GHC.Hs.Pat (
 
         isSimplePat, isSimpleMatchPat,
         looksLazyPatBind,
-        isBangedLPat,
+        isBangedLPat, isBangedLMatchPat,
         gParPat, patNeedsParens, parenthesizePat, parenthesizeLMatchPat,
         isIrrefutableHsPat,
 
@@ -480,6 +480,9 @@ patterns are treated specially, of course.
 
 The 1.3 report defines what ``irrefutable'' and ``failure-free'' patterns are.
 -}
+isBangedLMatchPat :: LMatchPat (GhcPass p) -> Bool
+isBangedLMatchPat (L _ (VisPat _ pat)) = isBangedLPat pat
+isBangedLMatchPat _                    = False
 
 isBangedLPat :: LPat (GhcPass p) -> Bool
 isBangedLPat = isBangedPat . unLoc
