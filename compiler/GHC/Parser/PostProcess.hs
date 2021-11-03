@@ -60,6 +60,8 @@ module GHC.Parser.PostProcess (
         checkPrecP,           -- Int -> P Int
         checkContext,         -- HsType -> P HsContext
         checkPattern,         -- HsExp -> P HsPat
+        checkLMatchPattern,
+        mkInvisPatBuilder,
         checkPattern_details,
         incompleteDoBlock,
         ParseContext(..),
