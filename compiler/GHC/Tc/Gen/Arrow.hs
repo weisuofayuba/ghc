@@ -370,10 +370,10 @@ tcCmdMatchLambda env
     -- Check the patterns, and the GRHSs inside
     tc_match arg_tys cmd_stk' (L mtch_loc (Match { m_pats = pats, m_grhss = grhss }))
       = do { (pats', grhss') <- setSrcSpanA mtch_loc           $
-                                tcPats match_ctxt pats arg_tys $
+                                tcLMatchPats match_ctxt pats arg_tys $
                                 tc_grhss grhss cmd_stk' (mkCheckExpType res_ty)
 
-           ; let arg_tys' = map (unrestricted . hsLPatType) pats'
+           ; let arg_tys' = map (unrestricted . hsLMatchPatType) pats'
 
            ; zipWithM_
                (\ (Scaled _ arg_ty) i ->

@@ -19,8 +19,7 @@
 
 -- See Note [Language.Haskell.Syntax.* Hierarchy] for why not GHC.Hs.*
 module Language.Haskell.Syntax.Pat (
-        Pat(..), LPat,
-        ConLikeP,
+        Pat(..), LPat, MatchPat(..), LMatchPat, ConLikeP,
 
         HsConPatDetails, hsConPatArgs,
         HsRecFields(..), HsFieldBind(..), LHsFieldBind,
@@ -214,6 +213,13 @@ data Pat p
 
 type family ConLikeP x
 
+data MatchPat pass
+  = VisPat (XVisPat pass) (LPat pass)
+  | InvisTyVarPat (XInvisTyVarPat pass) (LHsTyVarBndr () pass)
+  | InvisWildTyPat (XInvisWildTyPat pass)
+  | XMatchPat !(XXMatchPat pass)
+
+type LMatchPat pass = XRec pass (MatchPat pass)
 
 -- ---------------------------------------------------------------------
 
