@@ -1,0 +1,22 @@
+
+==================== Output Cmm ====================
+[violate_hp_invariant() { //  [R1]
+         { info_tbls: []
+           stack_info: arg_space: 8
+         }
+     {offset
+       c4: // global
+           //tick src<cmm_hp_aliases.cmm:(4,1)-(12,1)>
+           //tick src<cmm_hp_aliases.cmm:6:6-14>
+           //tick src<cmm_hp_aliases.cmm:7:6-20>
+           //tick src<cmm_hp_aliases.cmm:8:9-19>
+           _c3::I64 = I64[Hp + 16];
+           I64[Hp + 8] = 1;
+           //tick src<cmm_hp_aliases.cmm:9:9-21>
+           I64[Hp + 16] = _c3::I64;
+           R1 = _c3::I64;
+           call (P64[Sp])(R1) args: 8, res: 0, upd: 8;
+     }
+ }]
+
+
