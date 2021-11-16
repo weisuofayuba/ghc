@@ -122,6 +122,13 @@ import Data.Either (partitionEithers)
 uninitialised :: a
 uninitialised = panic "Loader not initialised"
 
+dllsSupported :: Bool
+#if defined(CAN_LOAD_DLL)
+dllsSupported = True
+#else
+dllsSupported = False
+#endif
+
 modifyLoaderState_ :: Interp -> (LoaderState -> IO LoaderState) -> IO ()
 modifyLoaderState_ interp f =
   modifyMVar_ (loader_state (interpLoader interp))
@@ -1343,8 +1350,7 @@ loadPackage interp hsc_env pkg
             (text "Loading unit " <> pprUnitInfoForUser pkg <> text " ... ")
 
         -- See comments with partOfGHCi
-#if defined(CAN_LOAD_DLL)
-        when (unitPackageName pkg `notElem` partOfGHCi) $ do
+        when (dllsSupported && unitPackageName pkg `notElem` partOfGHCi) $ do
             loadFrameworks interp platform pkg
             -- See Note [Crash early load_dyn and locateLib]
             -- Crash early if can't load any of `known_dlls`
@@ -1352,7 +1358,7 @@ loadPackage interp hsc_env pkg
             -- For remaining `dlls` crash early only when there is surely
             -- no package's DLL around ... (not is_dyn)
             mapM_ (load_dyn interp hsc_env (not is_dyn) . platformSOName platform) dlls
-#endif
+
         -- After loading all the DLLs, we can load the static objects.
         -- Ordering isn't important here, because we do one final link
         -- step to resolve everything.
@@ -1498,14 +1504,10 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib
     --   shared libraries because they are simpler and faster.
     --
   =
-#if defined(CAN_LOAD_DLL)
     findDll   user `orElse`
-#endif
     tryImpLib user `orElse`
-#if defined(CAN_LOAD_DLL)
     findDll   gcc  `orElse`
     findSysDll     `orElse`
-#endif
     tryImpLib gcc  `orElse`
     findArchive    `orElse`
     tryGcc         `orElse`
@@ -1560,23 +1562,28 @@ locateLib interp hsc_env is_hs lib_dirs gcc_dirs lib
      findDynObject = liftM (fmap $ Objects . (:[]))  $ findFile dirs dyn_obj_file
      findArchive   = let local name = liftM (fmap Archive) $ findFile dirs name
                      in  apply (map local arch_files)
-     findHSDll     = liftM (fmap DLLPath) $ findFile dirs hs_dyn_lib_file
+     findHSDll     = ifDllsSupported $ liftM (fmap DLLPath) $ findFile dirs hs_dyn_lib_file
      findDll    re = let dirs' = if re == user then lib_dirs else gcc_dirs
-                     in liftM (fmap DLLPath) $ findFile dirs' dyn_lib_file
-     findSysDll    = fmap (fmap $ DLL . dropExtension . takeFileName) $
-                        findSystemLibrary interp so_name
+                     in ifDllsSupported $ liftM (fmap DLLPath) $ findFile dirs' dyn_lib_file
+     findSysDll    = ifDllsSupported $
+                       fmap (fmap $ DLL . dropExtension . takeFileName) $
+                       findSystemLibrary interp so_name
+
+     ifDllsSupported :: IO (Maybe a) -> IO (Maybe a)
+     ifDllsSupported k
+       | dllsSupported = k
+       | otherwise     = return Nothing
+
      tryGcc        = let search   = searchForLibUsingGcc logger dflags
                          dllpath  = liftM (fmap DLLPath)
                          short    = dllpath $ search so_name lib_dirs
                          full     = dllpath $ search lib_so_name lib_dirs
                          gcc name = liftM (fmap Archive) $ search name lib_dirs
                          files    = import_libs ++ arch_files
-                         dlls     = [short, full]
+                         dlls     = if dllsSupported then [short, full] else []
                          archives = map gcc files
                      in apply $
-#if defined(CAN_LOAD_DLL)
                           dlls ++
-#endif
                           archives
      tryImpLib re = case os of
                        OSMinGW32 ->
