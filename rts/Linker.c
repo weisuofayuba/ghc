@@ -1881,7 +1881,7 @@ static HsInt resolveObjs_ (void)
         if (!r)
         {
             errorBelch("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
-            IF_DEBUG(linker, printLoadedObjects());
+            IF_DEBUG(linker_verbose, printLoadedObjects());
             fflush(stderr);
             return r;
         }
