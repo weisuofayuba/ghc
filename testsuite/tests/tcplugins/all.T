@@ -10,7 +10,7 @@ test('TcPlugin_Nullary'
       ]
     , multimod_compile
     , [ 'TcPlugin_Nullary.hs'
-      , '-dynamic -package ghc' if have_dynamic() else '-package ghc' ]
+      , '-dynamic -package ghc' if ghc_dynamic() else '-package ghc' ]
     )
 
 # See ArgsPlugin.hs for a description of this plugin.
@@ -24,7 +24,7 @@ test('TcPlugin_Args'
       ]
     , multimod_compile_and_run
     , [ 'TcPlugin_Args.hs'
-      , '-dynamic -package ghc' if have_dynamic() else '-package ghc' ]
+      , '-dynamic -package ghc' if ghc_dynamic() else '-package ghc' ]
     )
 
 # See TyFamPlugin.hs for a description of this plugin.
@@ -38,7 +38,7 @@ test('TcPlugin_TyFam'
       ]
     , multimod_compile
     , [ 'TcPlugin_TyFam.hs'
-      , '-dynamic -package ghc' if have_dynamic() else '-package ghc' ]
+      , '-dynamic -package ghc' if ghc_dynamic() else '-package ghc' ]
     )
 
 # See RewritePlugin.hs for a description of this plugin.
@@ -52,7 +52,7 @@ test('TcPlugin_Rewrite'
       ]
     , multimod_compile
     , [ 'TcPlugin_Rewrite.hs'
-      , '-dynamic -package ghc' if have_dynamic() else '-package ghc ' ]
+      , '-dynamic -package ghc' if ghc_dynamic() else '-package ghc ' ]
     )
 
 # See RewritePerfPlugin.hs for a description of this plugin.
@@ -68,5 +68,5 @@ test('TcPlugin_RewritePerf'
       ]
     , multimod_compile_fail
     , [ 'TcPlugin_RewritePerf.hs'
-      , '-dynamic -package ghc' if have_dynamic() else '-package ghc' ]
+      , '-dynamic -package ghc' if ghc_dynamic() else '-package ghc' ]
     )
