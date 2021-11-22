@@ -1646,8 +1646,10 @@ mightEqualLater (IS { inert_cycle_breakers = cbvs })
       = False
     can_unify lhs_tv _other _rhs_ty = mentions_meta_ty_var lhs_tv
 
-prohibitedSuperClassSolve :: CtLoc -> CtLoc -> Bool
--- See Note [Solving superclass constraints] in GHC.Tc.TyCl.Instance
+prohibitedSuperClassSolve :: CtLoc    -- ^ is it loopy to use this one ...
+                          -> CtLoc    -- ^ ... to solve this one?
+                          -> Bool     -- ^ True ==> don't solve it
+-- See Note [Solving superclass constraints] in GHC.Tc.TyCl.Instance, (sc2)
 prohibitedSuperClassSolve from_loc solve_loc
   | InstSCOrigin _ given_size <- ctLocOrigin from_loc
   , ScOrigin wanted_size <- ctLocOrigin solve_loc

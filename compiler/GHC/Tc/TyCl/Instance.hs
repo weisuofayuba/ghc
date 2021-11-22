@@ -1548,7 +1548,7 @@ Here is an example, taken from CmmExpr:
 (i2)   instance (Ord r, UserOfRegs r CmmReg) => UserOfRegs r CmmExpr where
 
 For (i1) we can get the (Ord r) superclass by selection from (UserOfRegs r a),
-since it is smaller than the thing we are building (UserOfRegs r (Maybe a).
+since it is smaller than the thing we are building (UserOfRegs r (Maybe a)).
 
 But for (i2) that isn't the case, so we must add an explicit, and
 perhaps surprising, (Ord r) argument to the instance declaration.
@@ -1586,19 +1586,20 @@ Answer:
           class C a => D a where...
           instance blah => D [a] where ...
     The wanted superclass constraint for C [a] has origin
-    ScOrigin size, where size = size( D [a] ).
+    ScOrigin size, where size = size( [a] ).
 
   * (sc1) When we rewrite such a wanted constraint, it retains its
     origin.  But if we apply an instance declaration, we can set the
     origin to (ScOrigin infinity), thus lifting any restrictions by
-    making prohibitedSuperClassSolve return False.
+    making prohibitedSuperClassSolve return False. This happens
+    in GHC.Tc.Solver.Interact.checkInstanceOK.
 
   * (sc2) ScOrigin wanted constraints can't be solved from a
     superclass selection, except at a smaller type.  This test is
-    implemented by GHC.Tc.Solver.Interact.prohibitedSuperClassSolve
+    implemented by GHC.Tc.Solver.InertSet.prohibitedSuperClassSolve
 
   * The "given" constraints of an instance decl have CtOrigin
-    GivenOrigin InstSkol.
+    InstSCOrigin.
 
   * When we make a superclass selection from InstSkol we use
     a CtOrigin of (InstSCOrigin size), where 'size' is the size of

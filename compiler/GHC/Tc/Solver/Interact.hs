@@ -2209,7 +2209,7 @@ chooseInstance work_item lookup_res
   = pprPanic "chooseInstance" (ppr work_item $$ ppr lookup_res)
 
 checkInstanceOK :: CtLoc -> InstanceWhat -> TcPredType -> TcS CtLoc
--- Check that it's OK to use this insstance:
+-- Check that it's OK to use this instance:
 --    (a) the use is well staged in the Template Haskell sense
 -- Returns the CtLoc to used for sub-goals
 -- Probably also want to call checkReductionDepth, but this function
@@ -2223,6 +2223,8 @@ checkInstanceOK loc what pred
 
      zap_origin loc  -- After applying an instance we can set ScOrigin to
                      -- infinity, so that prohibitedSuperClassSolve never fires
+                     -- See Note [Solving superclass constraints] in
+                     -- GHC.Tc.TyCl.Instance, (sc1).
        | ScOrigin {} <- origin
        = setCtLocOrigin loc (ScOrigin infinity)
        | otherwise
