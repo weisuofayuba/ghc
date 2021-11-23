@@ -63,6 +63,7 @@ import GHC.Types.Name( isSystemName )
 import GHC.Tc.Utils.Instantiate
 import GHC.Core.TyCon
 import GHC.Builtin.Types
+import GHC.Types.SrcLoc
 import GHC.Types.Var as Var
 import GHC.Types.Var.Set
 import GHC.Types.Var.Env
@@ -454,6 +455,19 @@ matchExpectedFunTys herald ctx matches orig_ty thing_inside
            ; wrap <- tcSubType AppOrigin ctx unif_fun_ty fun_ty
                          -- Not a good origin at all :-(
            ; return (wrap, result) }
+
+    patToExpBinder :: LMatchPat GhcRn -> TcM ExpTyCoBinder
+    patToExpBinder (L _ (VisPat _ _)) =
+      do { ty <- mkScaled <$> newFlexiTyVarTy multiplicityTy <*> newInferExpType
+         ; return (ExpAnon VisArg ty) }
+    patToExpBinder (L _ (InvisTyVarPat _ _)) =
+      do { var <- newOpenFlexiTyVar
+         ; return (ExpNamed (Bndr var Specified))
+         }
+    patToExpBinder (L _ (InvisWildTyPat _)) =
+      do { var <- newOpenFlexiTyVar
+         ; return (ExpNamed (Bndr var Inferred))
+         }
 
     ------------
     mk_ctxt :: [ExpTyCoBinder] -> TcType -> TidyEnv -> TcM (TidyEnv, SDoc)
