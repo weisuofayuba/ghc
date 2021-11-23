@@ -1296,6 +1296,12 @@ extractExpr (ExpectedFunTyViewPat e)    = e
 extractExpr (ExpectedFunTyLamCase _ e)  = e
 extractExpr _                           = panic "no expr"
 
+extractExpr :: ExpectedFunTyOrigin -> HsExpr GhcRn
+extractExpr (ExpectedFunTySyntaxOp _ e) = e
+extractExpr (ExpectedFunTyViewPat e)    = e
+extractExpr (ExpectedFunTyLamCase e)    = e
+extractExpr _                           = panic "no expr"
+
 pprExpectedFunTyOrigin :: ExpectedFunTyOrigin
                        -> Int -- ^ argument position (starting at 1)
                        -> SDoc
