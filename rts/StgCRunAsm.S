@@ -5,8 +5,8 @@
  * then functions StgRun/StgReturn are implemented in file StgCRun.c */
 #if !defined(USE_MINIINTERPRETER)
 
-#if defined(powerpc64le_HOST_ARCH)
-# if defined(linux_HOST_OS)
+#if defined(powerpc64le_HOST_ARCH) || defined(powerpc64_HOST_ARCH)
+# if defined(_CALL_ELF) && _CALL_ELF == 2
 /* 64-bit PowerPC ELF V2 ABI Revision 1.4
  *
  * Stack frame organization (see Figure 2.18, ELF V2 ABI Revision 1.4, p 31)
@@ -68,8 +68,6 @@ StgReturn:
         b _restfpr_14
 
 	.section	.note.GNU-stack,"",@progbits
-# else // linux_HOST_OS
-# error Only Linux support for power64 little endian right now.
 # endif
 
 #elif defined(powerpc_HOST_ARCH)
