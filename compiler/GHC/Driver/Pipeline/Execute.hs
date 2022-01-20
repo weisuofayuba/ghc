@@ -1065,6 +1065,7 @@ hscPostBackendPhase _ bcknd =
         LLVM        -> LlvmOpt
         NoBackend   -> StopLn
         Interpreter -> StopLn
+        JavaScript  -> StopLn
 
 
 compileStub :: HscEnv -> FilePath -> IO FilePath

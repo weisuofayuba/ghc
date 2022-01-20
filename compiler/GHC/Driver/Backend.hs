@@ -81,6 +81,8 @@ data Backend
                    -- Haddock) or when the user requested it (via -fno-code) for
                    -- some reason.
 
+   | JavaScript    -- ^ JavaScript backend
+
    deriving (Eq,Ord,Show,Read)
 
 -- | Default backend to use for the given platform.
@@ -111,6 +113,7 @@ backendProducesObject :: Backend -> Bool
 backendProducesObject ViaC        = True
 backendProducesObject NCG         = True
 backendProducesObject LLVM        = True
+backendProducesObject JavaScript  = True
 backendProducesObject Interpreter = False
 backendProducesObject NoBackend   = False
 
@@ -129,3 +132,4 @@ backendRetainsAllBindings NoBackend   = True
 backendRetainsAllBindings ViaC        = False
 backendRetainsAllBindings NCG         = False
 backendRetainsAllBindings LLVM        = False
+backendRetainsAllBindings JavaScript  = False

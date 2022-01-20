@@ -117,6 +117,7 @@ codeOutput logger tmpfs dflags unit_state this_mod filenm location genForeignStu
                  LLVM        -> outputLlvm logger dflags filenm linted_cmm_stream
                  Interpreter -> panic "codeOutput: Interpreter"
                  NoBackend   -> panic "codeOutput: NoBackend"
+                 JavaScript  -> panic "codeOutput: JavaScript"
         ; let stubs = genForeignStubs a
         ; stubs_exist <- outputForeignStubs logger tmpfs dflags unit_state this_mod location stubs
         ; return (filenm, stubs_exist, foreign_fps, a)
