@@ -34,7 +34,7 @@ module GHC.Hs.Pat (
         hsRecFields, hsRecFieldSel, hsRecFieldId, hsRecFieldsArgs,
         hsRecUpdFieldId, hsRecUpdFieldOcc, hsRecUpdFieldRdr,
 
-        mkPrefixConPat, mkCharLitPat, mkNilPat, mkVisPat, expectVisPats,
+        mkPrefixConPat, mkCharLitPat, mkNilPat, mkVisPat, mkVisPat', expectVisPats,
 
         isSimplePat, isSimpleMatchPat,
         looksLazyPatBind,
@@ -185,6 +185,10 @@ type instance XXMatchPat (GhcPass _) = DataConCantHappen
 -- | A helper function that constructs a match pattern from an LPat
 mkVisPat :: LPat (GhcPass pass) -> LMatchPat (GhcPass pass)
 mkVisPat lpat = L (getLoc lpat) (VisPat noExtField lpat)
+
+-- | A helper function that constructs a match pattern from a Pat
+mkVisPat' :: Pat (GhcPass pass) -> MatchPat (GhcPass pass)
+mkVisPat' pat = VisPat noExtField (L noSrcSpanA pat)
 
 expectVisPats :: forall pass. UnXRec pass => [LMatchPat pass] -> [LPat pass]
 expectVisPats [] = []
