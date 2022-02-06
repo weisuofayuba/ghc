@@ -20,6 +20,7 @@ import GHC.Prelude
 
 import GHC.Driver.Session
 import GHC.Driver.Config
+import GHC.Driver.Config.Core.Lint ( endPassIO )
 import GHC.Driver.Env
 import GHC.Driver.Backend
 import GHC.Driver.Plugins
@@ -51,7 +52,6 @@ import GHC.Core.DataCon ( dataConWrapId )
 import GHC.Core.Make
 import GHC.Core.Rules
 import GHC.Core.Opt.Monad ( CoreToDo(..) )
-import GHC.Core.Lint     ( endPassIO )
 import GHC.Core.Ppr
 
 import GHC.Builtin.Names

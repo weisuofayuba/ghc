@@ -104,6 +104,7 @@ import GHC.Driver.Env
 import GHC.Driver.Errors
 import GHC.Driver.Errors.Types
 import GHC.Driver.CodeOutput
+import GHC.Driver.Config.Core.Lint ( lintInteractiveExpr )
 import GHC.Driver.Config.Logger   (initLogFlags)
 import GHC.Driver.Config.Parser   (initParserOpts)
 import GHC.Driver.Config.Stg.Ppr  (initStgPprOpts)
@@ -143,7 +144,6 @@ import GHC.Iface.Ext.Debug  ( diffFile, validateScopes )
 import GHC.Core
 import GHC.Core.Tidy           ( tidyExpr )
 import GHC.Core.Type           ( Type, Kind )
-import GHC.Core.Lint           ( lintInteractiveExpr )
 import GHC.Core.Multiplicity
 import GHC.Core.Utils          ( exprType )
 import GHC.Core.ConLike

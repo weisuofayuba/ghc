@@ -18,6 +18,7 @@ import GHC.Prelude
 
 import GHC.Driver.Session
 import GHC.Driver.Backend
+import GHC.Driver.Config.Core.Lint (endPassIO)
 import GHC.Driver.Ppr
 import GHC.Driver.Env
 
@@ -32,7 +33,6 @@ import GHC.Core.Tidy
 import GHC.Core.Opt.Monad
 import GHC.Core.Stats   (coreBindsStats, CoreStats(..))
 import GHC.Core.Seq     (seqBinds)
-import GHC.Core.Lint
 import GHC.Core.Rules
 import GHC.Core.Opt.Arity   ( exprArity, exprBotStrictness_maybe )
 import GHC.Core.InstEnv

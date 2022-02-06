@@ -22,6 +22,7 @@ import GHC.Prelude
 import GHC.Platform
 
 import GHC.Driver.Session
+import GHC.Driver.Config.Core.Lint ( endPassIO )
 import GHC.Driver.Env
 import GHC.Driver.Ppr
 
@@ -38,7 +39,6 @@ import GHC.Core.Utils
 import GHC.Core.Opt.Arity
 import GHC.Core.FVs
 import GHC.Core.Opt.Monad ( CoreToDo(..) )
-import GHC.Core.Lint    ( endPassIO )
 import GHC.Core
 import GHC.Core.Make hiding( FloatBind(..) )   -- We use our own FloatBind here
 import GHC.Core.Type

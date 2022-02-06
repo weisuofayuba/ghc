@@ -370,6 +370,7 @@ Library
         GHC.Driver.CmdLine
         GHC.Driver.CodeOutput
         GHC.Driver.Config
+        GHC.Driver.Config.CoreToStg.Prep
         GHC.Driver.Config.Cmm
         GHC.Driver.Config.CmmToAsm
         GHC.Driver.Config.CmmToLlvm
