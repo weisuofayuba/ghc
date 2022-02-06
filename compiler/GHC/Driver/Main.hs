@@ -104,7 +104,8 @@ import GHC.Driver.Env
 import GHC.Driver.Errors
 import GHC.Driver.Errors.Types
 import GHC.Driver.CodeOutput
-import GHC.Driver.Config.Core.Lint ( lintInteractiveExpr )
+import GHC.Driver.Config.Core.Lint ( initLintPassResultConfig, lintInteractiveExpr )
+import GHC.Driver.Config.CoreToStg.Prep
 import GHC.Driver.Config.Logger   (initLogFlags)
 import GHC.Driver.Config.Parser   (initParserOpts)
 import GHC.Driver.Config.Stg.Ppr  (initStgPprOpts)
@@ -1607,9 +1608,15 @@ hscGenHardCode hsc_env cgguts location output_filename = do
         -------------------
         -- PREPARE FOR CODE GENERATION
         -- Do saturation and convert to A-normal form
-        (prepd_binds) <- {-# SCC "CorePrep" #-}
-                       corePrepPgm hsc_env this_mod location
-                                   core_binds data_tycons
+        (prepd_binds) <- {-# SCC "CorePrep" #-} do
+          cp_cfg <- initCorePrepConfig hsc_env
+          let dflags = hsc_dflags hsc_env
+          corePrepPgm
+            (hsc_logger hsc_env)
+            (initLintPassResultConfig (hsc_IC hsc_env) dflags)
+            cp_cfg
+            (initCorePrepPgmConfig dflags)
+            this_mod location core_binds data_tycons
 
         -----------------  Convert to STG ------------------
         (stg_binds, denv, (caf_ccs, caf_cc_stacks))
@@ -1686,8 +1693,15 @@ hscInteractive hsc_env cgguts location = do
     -------------------
     -- PREPARE FOR CODE GENERATION
     -- Do saturation and convert to A-normal form
-    prepd_binds <- {-# SCC "CorePrep" #-}
-                   corePrepPgm hsc_env this_mod location core_binds data_tycons
+    prepd_binds <- {-# SCC "CorePrep" #-} do
+      cp_cfg <- initCorePrepConfig hsc_env
+      let dflags = hsc_dflags hsc_env
+      corePrepPgm
+        (hsc_logger hsc_env)
+        (initLintPassResultConfig (hsc_IC hsc_env) dflags)
+        cp_cfg
+        (initCorePrepPgmConfig dflags)
+        this_mod location core_binds data_tycons
 
     (stg_binds, _infotable_prov, _caf_ccs__caf_cc_stacks)
       <- {-# SCC "CoreToStg" #-}
@@ -2015,8 +2029,15 @@ hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
 
     {- Prepare For Code Generation -}
     -- Do saturation and convert to A-normal form
-    prepd_binds <- {-# SCC "CorePrep" #-}
-      liftIO $ corePrepPgm hsc_env this_mod iNTERACTIVELoc core_binds data_tycons
+    prepd_binds <- {-# SCC "CorePrep" #-} liftIO $ do
+      cp_cfg <- initCorePrepConfig hsc_env
+      let dflags = hsc_dflags hsc_env
+      corePrepPgm
+        (hsc_logger hsc_env)
+        (initLintPassResultConfig (hsc_IC hsc_env) dflags)
+        cp_cfg
+        (initCorePrepPgmConfig dflags)
+        this_mod iNTERACTIVELoc core_binds data_tycons
 
     (stg_binds, _infotable_prov, _caf_ccs__caf_cc_stacks)
         <- {-# SCC "CoreToStg" #-}
@@ -2193,7 +2214,10 @@ hscCompileCoreExpr' hsc_env srcspan ds_expr
          ; let tidy_expr = tidyExpr emptyTidyEnv simpl_expr
 
            {- Prepare for codegen -}
-         ; prepd_expr <- corePrepExpr hsc_env tidy_expr
+         ; cp_cfg <- initCorePrepConfig hsc_env
+         ; prepd_expr <- corePrepExpr
+            (hsc_logger hsc_env) cp_cfg
+            tidy_expr
 
            {- Lint if necessary -}
          ; lintInteractiveExpr (text "hscCompileExpr") hsc_env prepd_expr

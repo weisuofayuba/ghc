@@ -1,4 +1,3 @@
-
 {-# LANGUAGE BangPatterns #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
@@ -11,7 +10,9 @@ Core pass to saturate constructors and PrimOps
 -}
 
 module GHC.CoreToStg.Prep
-   ( corePrepPgm
+   ( CorePrepConfig (..)
+   , CorePrepPgmConfig (..)
+   , corePrepPgm
    , corePrepExpr
    , mkConvertNumLiteral
    )
@@ -21,10 +22,7 @@ import GHC.Prelude
 
 import GHC.Platform
 
-import GHC.Driver.Session
-import GHC.Driver.Config.Core.Lint ( endPassIO )
-import GHC.Driver.Env
-import GHC.Driver.Ppr
+import GHC.Driver.Flags
 
 import GHC.Tc.Utils.Env
 import GHC.Unit
@@ -39,6 +37,7 @@ import GHC.Core.Utils
 import GHC.Core.Opt.Arity
 import GHC.Core.FVs
 import GHC.Core.Opt.Monad ( CoreToDo(..) )
+import GHC.Core.Lint    ( LintPassResultConfig, endPassIO' )
 import GHC.Core
 import GHC.Core.Make hiding( FloatBind(..) )   -- We use our own FloatBind here
 import GHC.Core.Type
@@ -70,7 +69,7 @@ import GHC.Types.Id
 import GHC.Types.Id.Info
 import GHC.Types.Id.Make ( realWorldPrimId )
 import GHC.Types.Basic
-import GHC.Types.Name   ( NamedThing(..), nameSrcSpan, isInternalName )
+import GHC.Types.Name   ( Name, NamedThing(..), nameSrcSpan, isInternalName )
 import GHC.Types.SrcLoc ( SrcSpan(..), realSrcLocSpan, mkRealSrcLoc )
 import GHC.Types.Literal
 import GHC.Types.Tickish
@@ -236,17 +235,28 @@ type CpeRhs  = CoreExpr    -- Non-terminal 'rhs'
 ************************************************************************
 -}
 
-corePrepPgm :: HscEnv -> Module -> ModLocation -> CoreProgram -> [TyCon]
+data CorePrepPgmConfig = CorePrepPgmConfig
+  { cpPgm_dumpCoreSizes     :: Bool
+  , cpPgm_generateDebugInfo :: Bool
+  }
+
+corePrepPgm :: Logger
+            -> LintPassResultConfig -> CorePrepConfig
+            -> CorePrepPgmConfig
+            -> Module -> ModLocation -> CoreProgram -> [TyCon]
             -> IO CoreProgram
-corePrepPgm hsc_env this_mod mod_loc binds data_tycons =
+corePrepPgm logger lp_cfg cp_cfg pgm_cfg
+            this_mod mod_loc binds data_tycons =
     withTiming logger
                (text "CorePrep"<+>brackets (ppr this_mod))
                (\a -> a `seqList` ()) $ do
     us <- mkSplitUniqSupply 's'
-    initialCorePrepEnv <- mkInitialCorePrepEnv hsc_env
+    let initialCorePrepEnv = mkInitialCorePrepEnv cp_cfg
 
     let
-        implicit_binds = mkDataConWorkers dflags mod_loc data_tycons
+        implicit_binds = mkDataConWorkers
+          (cpPgm_generateDebugInfo pgm_cfg)
+          mod_loc data_tycons
             -- NB: we must feed mkImplicitBinds through corePrep too
             -- so that they are suitably cloned and eta-expanded
 
@@ -255,18 +265,16 @@ corePrepPgm hsc_env this_mod mod_loc binds data_tycons =
                       floats2 <- corePrepTopBinds initialCorePrepEnv implicit_binds
                       return (deFloatTop (floats1 `appendFloats` floats2))
 
-    endPassIO hsc_env alwaysQualify CorePrep binds_out []
+    endPassIO' logger lp_cfg (cpPgm_dumpCoreSizes pgm_cfg)
+               alwaysQualify CorePrep binds_out []
     return binds_out
   where
-    dflags = hsc_dflags hsc_env
-    logger = hsc_logger hsc_env
 
-corePrepExpr :: HscEnv -> CoreExpr -> IO CoreExpr
-corePrepExpr hsc_env expr = do
-    let logger = hsc_logger hsc_env
+corePrepExpr :: Logger -> CorePrepConfig -> CoreExpr -> IO CoreExpr
+corePrepExpr logger config expr = do
     withTiming logger (text "CorePrep [expr]") (\e -> e `seq` ()) $ do
       us <- mkSplitUniqSupply 's'
-      initialCorePrepEnv <- mkInitialCorePrepEnv hsc_env
+      let initialCorePrepEnv = mkInitialCorePrepEnv config
       let new_expr = initUs_ us (cpeBodyNF initialCorePrepEnv expr)
       putDumpFileMaybe logger Opt_D_dump_prep "CorePrep" FormatCore (ppr new_expr)
       return new_expr
@@ -285,10 +293,10 @@ corePrepTopBinds initialCorePrepEnv binds
                                floatss <- go env' binds
                                return (floats `appendFloats` floatss)
 
-mkDataConWorkers :: DynFlags -> ModLocation -> [TyCon] -> [CoreBind]
+mkDataConWorkers :: Bool -> ModLocation -> [TyCon] -> [CoreBind]
 -- See Note [Data constructor workers]
 -- c.f. Note [Injecting implicit bindings] in GHC.Iface.Tidy
-mkDataConWorkers dflags mod_loc data_tycons
+mkDataConWorkers generate_debug_info mod_loc data_tycons
   = [ NonRec id (tick_it (getName data_con) (Var id))
                                 -- The ice is thin here, but it works
     | tycon <- data_tycons,     -- CorePrep will eta-expand it
@@ -299,11 +307,12 @@ mkDataConWorkers dflags mod_loc data_tycons
    -- If we want to generate debug info, we put a source note on the
    -- worker. This is useful, especially for heap profiling.
    tick_it name
-     | debugLevel dflags == 0                = id
+     | not generate_debug_info               = id
      | RealSrcSpan span _ <- nameSrcSpan name = tick span
      | Just file <- ml_hs_file mod_loc       = tick (span1 file)
      | otherwise                             = tick (span1 "???")
-     where tick span  = Tick (SourceNote span $ showSDoc dflags (ppr name))
+     where tick span  = Tick $ SourceNote span $
+             renderWithContext defaultSDocContext $ ppr name
            span1 file = realSrcLocSpan $ mkRealSrcLoc (mkFastString file) 1 1
 
 {-
@@ -776,7 +785,7 @@ cpeRhsE env (Type ty)
 cpeRhsE env (Coercion co)
   = return (emptyFloats, Coercion (cpSubstCo env co))
 cpeRhsE env expr@(Lit (LitNumber nt i))
-   = case cpe_convertNumLit env nt i of
+   = case cp_convertNumLit (cpe_config env) nt i of
       Nothing -> return (emptyFloats, expr)
       Just e  -> cpeRhsE env e
 cpeRhsE _env expr@(Lit {}) = return (emptyFloats, expr)
@@ -850,13 +859,7 @@ cpeRhsE env (Case scrut bndr ty alts)
   = do { (floats, scrut') <- cpeBody env scrut
        ; (env', bndr2) <- cpCloneBndr env bndr
        ; let alts'
-                 -- This flag is intended to aid in debugging strictness
-                 -- analysis bugs. These are particularly nasty to chase down as
-                 -- they may manifest as segmentation faults. When this flag is
-                 -- enabled we instead produce an 'error' expression to catch
-                 -- the case where a function we think should bottom
-                 -- unexpectedly returns.
-               | gopt Opt_CatchNonexhaustiveCases (cpe_dynFlags env)
+               | cp_catchNonexhaustiveCases $ cpe_config env
                , not (altsAreExhaustive alts)
                = addDefault alts (Just err)
                | otherwise = alts
@@ -1926,8 +1929,19 @@ map to CoreExprs, not Ids.
 
 -}
 
+data CorePrepConfig = CorePrepConfig
+  { cp_catchNonexhaustiveCases :: Bool
+  , cp_convertNumLit           :: LitNumType -> Integer -> Maybe CoreExpr
+  }
+
 data CorePrepEnv
-  = CPE { cpe_dynFlags        :: DynFlags
+  = CPE { cpe_config          :: CorePrepConfig
+        -- ^ This flag is intended to aid in debugging strictness
+        -- analysis bugs. These are particularly nasty to chase down as
+        -- they may manifest as segmentation faults. When this flag is
+        -- enabled we instead produce an 'error' expression to catch
+        -- the case where a function we think should bottom
+        -- unexpectedly returns.
         , cpe_env             :: IdEnv CoreExpr   -- Clone local Ids
         -- ^ This environment is used for three operations:
         --
@@ -1942,20 +1956,13 @@ data CorePrepEnv
         --      and Note [CorePrep inlines trivial CoreExpr not Id] (#12076)
 
         , cpe_tyco_env :: Maybe CpeTyCoEnv -- See Note [CpeTyCoEnv]
-
-        , cpe_convertNumLit   :: LitNumType -> Integer -> Maybe CoreExpr
-        -- ^ Convert some numeric literals (Integer, Natural) into their
-        -- final Core form
     }
 
-mkInitialCorePrepEnv :: HscEnv -> IO CorePrepEnv
-mkInitialCorePrepEnv hsc_env = do
-   convertNumLit <- mkConvertNumLiteral hsc_env
-   return $ CPE
-      { cpe_dynFlags      = hsc_dflags hsc_env
+mkInitialCorePrepEnv :: CorePrepConfig -> CorePrepEnv
+mkInitialCorePrepEnv cfg = CPE
+      { cpe_config        = cfg
       , cpe_env           = emptyVarEnv
       , cpe_tyco_env      = Nothing
-      , cpe_convertNumLit = convertNumLit
       }
 
 extendCorePrepEnv :: CorePrepEnv -> Id -> Id -> CorePrepEnv
@@ -2233,13 +2240,12 @@ floatableTick tickish =
 
 -- | Create a function that converts Bignum literals into their final CoreExpr
 mkConvertNumLiteral
-   :: HscEnv
+   :: Platform
+   -> HomeUnit
+   -> (Name -> IO TyThing)
    -> IO (LitNumType -> Integer -> Maybe CoreExpr)
-mkConvertNumLiteral hsc_env = do
+mkConvertNumLiteral platform home_unit lookup_global = do
    let
-      dflags   = hsc_dflags hsc_env
-      platform = targetPlatform dflags
-      home_unit = hsc_home_unit hsc_env
       guardBignum act
          | isHomeUnitInstanceOf home_unit primUnitId
          = return $ panic "Bignum literals are not supported in ghc-prim"
@@ -2247,7 +2253,7 @@ mkConvertNumLiteral hsc_env = do
          = return $ panic "Bignum literals are not supported in ghc-bignum"
          | otherwise = act
 
-      lookupBignumId n      = guardBignum (tyThingId <$> lookupGlobal hsc_env n)
+      lookupBignumId n      = guardBignum (tyThingId <$> lookup_global n)
 
    -- The lookup is done here but the failure (panic) is reported lazily when we
    -- try to access the `bigNatFromWordList` function.
@@ -2264,8 +2270,6 @@ mkConvertNumLiteral hsc_env = do
 
       convertBignatPrim i =
          let
-            target    = targetPlatform dflags
-
             -- ByteArray# literals aren't supported (yet). Were they supported,
             -- we would use them directly. We would need to handle
             -- wordSize/endianness conversion between host and target
@@ -2281,7 +2285,7 @@ mkConvertNumLiteral hsc_env = do
                   f x = let low  = x .&. mask
                             high = x `shiftR` bits
                         in Just (mkConApp wordDataCon [Lit (mkLitWord platform low)], high)
-                  bits = platformWordSizeInBits target
+                  bits = platformWordSizeInBits platform
                   mask = 2 ^ bits - 1
 
          in mkApps (Var bignatFromWordListId) [words]
