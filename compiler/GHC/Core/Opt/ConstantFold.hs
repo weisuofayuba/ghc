@@ -1835,12 +1835,12 @@ dataToTagRule = a `mplus` b
     --   dataToTag x
     -- where x's unfolding is a constructor application
     b = do
-      dflags <- getPlatform
+      platform <- getPlatform
       [_, val_arg] <- getArgs
       in_scope <- getInScopeEnv
       (_,floats, dc,_,_) <- liftMaybe $ exprIsConApp_maybe in_scope val_arg
       massert (not (isNewTyCon (dataConTyCon dc)))
-      return $ wrapFloats floats (mkIntVal dflags (toInteger (dataConTagZ dc)))
+      return $ wrapFloats floats (mkIntVal platform (toInteger (dataConTagZ dc)))
 
 {- Note [dataToTag# magic]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

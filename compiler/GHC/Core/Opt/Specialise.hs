@@ -16,7 +16,7 @@ import GHC.Driver.Session
 import GHC.Driver.Ppr
 import GHC.Driver.Config
 import GHC.Driver.Config.Diagnostic
-import GHC.Driver.Env
+import GHC.Driver.Config.Core.Rules ( initRuleOpts )
 
 import GHC.Tc.Utils.TcType hiding( substTy )
 
@@ -66,7 +66,6 @@ import GHC.Utils.Trace
 
 import GHC.Unit.Module( Module )
 import GHC.Unit.Module.ModGuts
-import GHC.Unit.External
 
 {-
 ************************************************************************
@@ -736,10 +735,9 @@ spec_import top_env callers rb dict_binds cis@(CIS fn _)
   = do {     -- Get rules from the external package state
              -- We keep doing this in case we "page-fault in"
              -- more rules as we go along
-       ; hsc_env <- getHscEnv
-       ; eps <- liftIO $ hscEPS hsc_env
+       ; external_rule_base <- getExternalRuleBase
        ; vis_orphs <- getVisibleOrphanMods
-       ; let full_rb = unionRuleBase rb (eps_rule_base eps)
+       ; let full_rb = unionRuleBase rb external_rule_base
              rules_for_fn = getRules (RuleEnv full_rb vis_orphs) fn
 
        ; (rules1, spec_pairs, MkUD { ud_binds = dict_binds1, ud_calls = new_calls })

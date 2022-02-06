@@ -13,13 +13,15 @@ import GHC.Prelude
 import GHC.Driver.Session
 import GHC.Driver.Plugins ( withPlugins, installCoreToDos )
 import GHC.Driver.Env
+import GHC.Driver.Config.Core.Opt.WorkWrap ( initWorkWrapOpts )
+import GHC.Driver.Config.Core.Rules ( initRuleOpts )
 import GHC.Platform.Ways  ( hasWay, Way(WayProf) )
 
 import GHC.Core
 import GHC.Core.Opt.CSE  ( cseProgram )
 import GHC.Core.Rules   ( mkRuleBase, unionRuleBase,
                           extendRuleBaseList, ruleCheckProgram, addRuleInfo,
-                          getRules, initRuleOpts )
+                          getRules )
 import GHC.Core.Ppr     ( pprCoreBindings, pprCoreExpr )
 import GHC.Core.Opt.OccurAnal ( occurAnalysePgm, occurAnalyseExpr )
 import GHC.Core.Stats   ( coreBindsSize, coreBindsStats, exprSize )
@@ -488,7 +490,9 @@ doCorePass pass guts = do
                                  updateBinds cseProgram
 
     CoreLiberateCase          -> {-# SCC "LiberateCase" #-}
-                                 updateBinds (liberateCase dflags)
+                                 updateBinds (liberateCase
+                                               (unfoldingOpts dflags)
+                                               (liberateCaseThreshold dflags))
 
     CoreDoFloatInwards        -> {-# SCC "FloatInwards" #-}
                                  updateBinds (floatInwards platform)
@@ -512,7 +516,9 @@ doCorePass pass guts = do
                                  updateBindsM (liftIO . cprAnalProgram logger fam_envs)
 
     CoreDoWorkerWrapper       -> {-# SCC "WorkWrap" #-}
-                                 updateBinds (wwTopBinds (mg_module guts) dflags fam_envs us)
+                                 updateBinds (wwTopBinds
+                                               (initWorkWrapOpts (mg_module guts) dflags fam_envs)
+                                               us)
 
     CoreDoSpecialising        -> {-# SCC "Specialise" #-}
                                  specProgram guts

@@ -27,7 +27,8 @@ module GHC.Core.Opt.Monad (
     CoreM, runCoreM,
 
     -- ** Reading from the monad
-    getHscEnv, getRuleBase, getModule,
+    getHscEnv, getModule,
+    getRuleBase, getExternalRuleBase,
     getDynFlags, getPackageFamInstEnv,
     getVisibleOrphanMods, getUniqMask,
     getPrintUnqualified, getSrcSpanM,
@@ -705,6 +706,9 @@ getHscEnv = read cr_hsc_env
 getRuleBase :: CoreM RuleBase
 getRuleBase = read cr_rule_base
 
+getExternalRuleBase :: CoreM RuleBase
+getExternalRuleBase = eps_rule_base <$> get_eps
+
 getVisibleOrphanMods :: CoreM ModuleSet
 getVisibleOrphanMods = read cr_visible_orphan_mods
 
@@ -732,10 +736,12 @@ instance HasModule CoreM where
     getModule = read cr_module
 
 getPackageFamInstEnv :: CoreM PackageFamInstEnv
-getPackageFamInstEnv = do
+getPackageFamInstEnv = eps_fam_inst_env <$> get_eps
+
+get_eps :: CoreM ExternalPackageState
+get_eps = do
     hsc_env <- getHscEnv
-    eps <- liftIO $ hscEPS hsc_env
-    return $ eps_fam_inst_env eps
+    liftIO $ hscEPS hsc_env
 
 {-
 ************************************************************************

@@ -8,7 +8,7 @@ A library for the ``worker\/wrapper'' back-end to the strictness analyser
 {-# LANGUAGE ViewPatterns #-}
 
 module GHC.Core.Opt.WorkWrap.Utils
-   ( WwOpts(..), initWwOpts, mkWwBodies, mkWWstr, mkWWstr_one, mkWorkerArgs
+   ( WwOpts(..), mkWwBodies, mkWWstr, mkWWstr_one, mkWorkerArgs
    , DataConPatContext(..)
    , UnboxingDecision(..), wantToUnboxArg
    , findTypeShape, IsRecDataConResult(..), isRecDataCon
@@ -18,9 +18,6 @@ module GHC.Core.Opt.WorkWrap.Utils
 where
 
 import GHC.Prelude
-
-import GHC.Driver.Session
-import GHC.Driver.Config (initSimpleOpts)
 
 import GHC.Core
 import GHC.Core.Utils
@@ -144,15 +141,6 @@ data WwOpts
 
   -- Used for absent argument error message
   , wo_module            :: !Module
-  }
-
-initWwOpts :: Module -> DynFlags -> FamInstEnvs -> WwOpts
-initWwOpts this_mod dflags fam_envs = MkWwOpts
-  { wo_fam_envs          = fam_envs
-  , wo_simple_opts       = initSimpleOpts dflags
-  , wo_cpr_anal          = gopt Opt_CprAnal dflags
-  , wo_fun_to_thunk      = gopt Opt_FunToThunk dflags
-  , wo_module            = this_mod
   }
 
 type WwResult

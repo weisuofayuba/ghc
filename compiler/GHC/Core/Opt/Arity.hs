@@ -11,7 +11,8 @@
 
 -- | Arity and eta expansion
 module GHC.Core.Opt.Arity
-   ( manifestArity, joinRhsArity, exprArity, typeArity
+   ( ArityOpts (..)
+   , manifestArity, joinRhsArity, exprArity, typeArity
    , exprEtaExpandArity, findRhsArity
    , etaExpand, etaExpandAT
    , exprBotStrictness_maybe
@@ -30,8 +31,6 @@ module GHC.Core.Opt.Arity
 where
 
 import GHC.Prelude
-
-import GHC.Driver.Session ( DynFlags, GeneralFlag(..), gopt )
 
 import GHC.Core
 import GHC.Core.FVs
@@ -621,10 +620,10 @@ takeWhileOneShot (AT oss div)
 
 -- | The Arity returned is the number of value args the
 -- expression can be applied to without doing much work
-exprEtaExpandArity :: DynFlags -> CoreExpr -> ArityType
+exprEtaExpandArity :: ArityOpts -> CoreExpr -> ArityType
 -- exprEtaExpandArity is used when eta expanding
 --      e  ==>  \xy -> e x y
-exprEtaExpandArity dflags e = arityType (etaExpandArityEnv dflags) e
+exprEtaExpandArity opts e = arityType (etaExpandArityEnv opts) e
 
 getBotArity :: ArityType -> Maybe Arity
 -- Arity of a divergent function
@@ -633,14 +632,14 @@ getBotArity (AT oss div)
   | otherwise        = Nothing
 
 ----------------------
-findRhsArity :: DynFlags -> Id -> CoreExpr -> Arity -> ArityType
+findRhsArity :: ArityOpts -> Id -> CoreExpr -> Arity -> ArityType
 -- This implements the fixpoint loop for arity analysis
 -- See Note [Arity analysis]
 -- If findRhsArity e = (n, is_bot) then
 --  (a) any application of e to <n arguments will not do much work,
 --      so it is safe to expand e  ==>  (\x1..xn. e x1 .. xn)
 --  (b) if is_bot=True, then e applied to n args is guaranteed bottom
-findRhsArity dflags bndr rhs old_arity
+findRhsArity opts bndr rhs old_arity
   = go 0 botArityType
       -- We always do one step, but usually that produces a result equal to
       -- old_arity, and then we stop right away, because old_arity is assumed
@@ -665,7 +664,7 @@ findRhsArity dflags bndr rhs old_arity
     step at = -- pprTrace "step" (ppr bndr <+> ppr at <+> ppr (arityType env rhs)) $
               arityType env rhs
       where
-        env = extendSigEnv (findRhsArityEnv dflags) bndr at
+        env = extendSigEnv (findRhsArityEnv opts) bndr at
 
 
 {-
@@ -851,6 +850,11 @@ We do this regardless of -fdicts-cheap; it's not really a dictionary.
 
 ---------------------------
 
+data ArityOpts = ArityOpts
+  { arity_pedBot     :: !Bool
+  , arity_dictsCheap :: !Bool
+  }
+
 -- | Each of the entry-points of the analyser ('arityType') has different
 -- requirements. The entry-points are
 --
@@ -869,13 +873,11 @@ We do this regardless of -fdicts-cheap; it's not really a dictionary.
 data AnalysisMode
   = BotStrictness
   -- ^ Used during 'exprBotStrictness_maybe'.
-  | EtaExpandArity { am_ped_bot :: !Bool
-                   , am_dicts_cheap :: !Bool }
+  | EtaExpandArity { am_opts :: !ArityOpts }
   -- ^ Used for finding an expression's eta-expanding arity quickly, without
   -- fixed-point iteration ('exprEtaExpandArity').
-  | FindRhsArity { am_ped_bot :: !Bool
-                 , am_dicts_cheap :: !Bool
-                 , am_sigs :: !(IdEnv ArityType) }
+  | FindRhsArity { am_opts :: !ArityOpts
+                 , am_sigs   :: !(IdEnv ArityType) }
   -- ^ Used for regular, fixed-point arity analysis ('findRhsArity').
   --   See Note [Arity analysis] for details about fixed-point iteration.
   --   INVARIANT: Disjoint with 'ae_joins'.
@@ -895,17 +897,15 @@ botStrictnessArityEnv :: ArityEnv
 botStrictnessArityEnv = AE { ae_mode = BotStrictness, ae_joins = emptyVarSet }
 
 -- | The @ArityEnv@ used by 'exprEtaExpandArity'.
-etaExpandArityEnv :: DynFlags -> ArityEnv
-etaExpandArityEnv dflags
-  = AE { ae_mode  = EtaExpandArity { am_ped_bot = gopt Opt_PedanticBottoms dflags
-                                   , am_dicts_cheap = gopt Opt_DictsCheap dflags }
+etaExpandArityEnv :: ArityOpts -> ArityEnv
+etaExpandArityEnv opts
+  = AE { ae_mode  = EtaExpandArity { am_opts = opts }
        , ae_joins = emptyVarSet }
 
 -- | The @ArityEnv@ used by 'findRhsArity'.
-findRhsArityEnv :: DynFlags -> ArityEnv
-findRhsArityEnv dflags
-  = AE { ae_mode  = FindRhsArity { am_ped_bot = gopt Opt_PedanticBottoms dflags
-                                 , am_dicts_cheap = gopt Opt_DictsCheap dflags
+findRhsArityEnv :: ArityOpts -> ArityEnv
+findRhsArityEnv opts
+  = AE { ae_mode  = FindRhsArity { am_opts = opts
                                  , am_sigs = emptyVarEnv }
        , ae_joins = emptyVarSet }
 
@@ -963,9 +963,9 @@ lookupSigEnv AE{ ae_mode = mode } id = case mode of
 -- 'exprBotStrictness_maybe' always is.
 pedanticBottoms :: ArityEnv -> Bool
 pedanticBottoms AE{ ae_mode = mode } = case mode of
-  BotStrictness                          -> True
-  EtaExpandArity{ am_ped_bot = ped_bot } -> ped_bot
-  FindRhsArity{ am_ped_bot = ped_bot }   -> ped_bot
+  BotStrictness                    -> True
+  EtaExpandArity{ am_opts = opts } -> arity_pedBot opts
+  FindRhsArity{ am_opts = opts }   -> arity_pedBot opts
 
 -- | A version of 'exprIsCheap' that considers results from arity analysis
 -- and optionally the expression's type.
@@ -977,7 +977,7 @@ myExprIsCheap AE{ae_mode = mode} e mb_ty = case mode of
     where
       cheap_dict = case mb_ty of
                      Nothing -> False
-                     Just ty -> (am_dicts_cheap mode && isDictTy ty)
+                     Just ty -> (arity_dictsCheap (am_opts mode) && isDictTy ty)
                                 || isCallStackPredTy ty
         -- See Note [Eta expanding through dictionaries]
         -- See Note [Eta expanding through CallStacks]
