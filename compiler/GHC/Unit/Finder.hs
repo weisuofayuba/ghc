@@ -484,7 +484,10 @@ findPackageModule_ fc fopts mod pkg_conf = do
 
        package_dynhisuf = waysBuildTag (addWay WayDyn (finder_ways fopts)) ++ "_hi"
 
-       mk_hi_loc = mkHiOnlyModLocation fopts package_hisuf package_dynhisuf
+       --TODO:
+       package_hifatsuf = "hifat"
+
+       mk_hi_loc = mkHiOnlyModLocation fopts package_hisuf package_dynhisuf package_hifatsuf
 
        import_dirs = map ST.unpack $ unitImportDirs pkg_conf
         -- we never look for a .hi-boot file in an external package;
@@ -590,13 +593,15 @@ mkHomeModLocation2 fopts mod src_basename ext =
        hi_fn  = mkHiPath   fopts src_basename mod_basename
        dyn_hi_fn  = mkDynHiPath   fopts src_basename mod_basename
        hie_fn = mkHiePath  fopts src_basename mod_basename
+       hi_fat_fn = mkHiFatPath  fopts src_basename mod_basename
 
    in (ModLocation{ ml_hs_file   = Just (src_basename <.> ext),
                         ml_hi_file   = hi_fn,
                         ml_dyn_hi_file = dyn_hi_fn,
                         ml_obj_file  = obj_fn,
                         ml_dyn_obj_file = dyn_obj_fn,
-                        ml_hie_file  = hie_fn })
+                        ml_hie_file  = hie_fn,
+                        ml_hi_fat_file = hi_fat_fn })
 
 mkHomeModHiOnlyLocation :: FinderOpts
                         -> ModuleName
@@ -609,9 +614,9 @@ mkHomeModHiOnlyLocation fopts mod path basename =
 
 -- This function is used to make a ModLocation for a package module. Hence why
 -- we explicitly pass in the interface file suffixes.
-mkHiOnlyModLocation :: FinderOpts -> Suffix -> Suffix -> FilePath -> String
+mkHiOnlyModLocation :: FinderOpts -> Suffix -> Suffix -> Suffix -> FilePath -> String
                     -> ModLocation
-mkHiOnlyModLocation fopts hisuf dynhisuf path basename
+mkHiOnlyModLocation fopts hisuf dynhisuf hifatsuf path basename
  = let full_basename = path </> basename
        obj_fn = mkObjPath fopts full_basename basename
        dyn_obj_fn = mkDynObjPath fopts full_basename basename
@@ -626,7 +631,8 @@ mkHiOnlyModLocation fopts hisuf dynhisuf path basename
                              -- MP: TODO
                              ml_dyn_hi_file  = full_basename <.> dynhisuf,
                              ml_obj_file  = obj_fn,
-                             ml_hie_file  = hie_fn
+                             ml_hie_file  = hie_fn,
+                             ml_hi_fat_file = full_basename <.> hifatsuf
                   }
 
 -- | Constructs the filename of a .o file for a given source file.
@@ -704,6 +710,21 @@ mkHiePath fopts basename mod_basename = hie_basename <.> hiesuf
 
                 hie_basename | Just dir <- hiedir = dir </> mod_basename
                              | otherwise          = basename
+
+-- | Constructs the filename of a .hi-fat file for a given source file.
+-- Does /not/ check whether the .hi-fat file exists
+mkHiFatPath
+  :: FinderOpts
+  -> FilePath           -- the filename of the source file, minus the extension
+  -> String             -- the module name with dots replaced by slashes
+  -> FilePath
+mkHiFatPath fopts basename mod_basename = hifat_basename <.> hifatsuf
+ where
+                hifatdir = finder_hifatDir fopts
+                hifatsuf = finder_hifatSuf fopts
+
+                hifat_basename | Just dir <- hifatdir = dir </> mod_basename
+                               | otherwise          = basename
 
 
 

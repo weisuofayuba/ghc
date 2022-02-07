@@ -59,7 +59,6 @@ import GHC.Unit.State
 import GHC.Unit.Home
 import GHC.Data.Maybe
 import GHC.Iface.Make
-import Data.Time
 import GHC.Driver.Config.Parser
 import GHC.Parser.Header
 import GHC.Data.StringBuffer
@@ -505,28 +504,23 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
               -- generate a interface without codeGen info.
               final_iface <- mkFullIface hsc_env partial_iface Nothing
               hscMaybeWriteIface logger dflags True final_iface mb_old_iface_hash location
+              bc <- generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
+              return ([], final_iface, Just bc, panic "interpreter")
 
-              (hasStub, comp_bc, spt_entries) <- hscInteractive hsc_env cgguts mod_location
-
-              stub_o <- case hasStub of
-                        Nothing -> return []
-                        Just stub_c -> do
-                            stub_o <- compileStub hsc_env stub_c
-                            return [DotO stub_o]
-
-              let hs_unlinked = [BCOs comp_bc spt_entries]
-              unlinked_time <- getCurrentTime
-              let !linkable = LM unlinked_time (mkHomeModule (hsc_home_unit hsc_env) mod_name)
-                             (hs_unlinked ++ stub_o)
-              return ([], final_iface, Just linkable, panic "interpreter")
           _ -> do
               output_fn <- phaseOutputFilenameNew next_phase pipe_env hsc_env (Just location)
               (outputFilename, mStub, foreign_files, cg_infos) <-
+
                 hscGenHardCode hsc_env cgguts mod_location output_fn
               final_iface <- mkFullIface hsc_env partial_iface (Just cg_infos)
 
               -- See Note [Writing interface files]
               hscMaybeWriteIface logger dflags False final_iface mb_old_iface_hash mod_location
+              mlinkable <-
+                if (gopt Opt_UseBytecodeRatherThanObjects dflags)
+                  then Just <$> generateFreshByteCode hsc_env mod_name (mkCgInteractiveGuts cgguts) mod_location
+                  else return Nothing
+
 
               stub_o <- mapM (compileStub hsc_env) mStub
               foreign_os <-
@@ -537,7 +531,9 @@ runHscBackendPhase pipe_env hsc_env mod_name src_flavour location result = do
               -- have some way to do before the object file is produced
               -- In future we can split up the driver logic more so that this function
               -- is in TPipeline and in this branch we can invoke the rest of the backend phase.
-              return (fos, final_iface, Nothing, outputFilename)
+              return (fos, final_iface, mlinkable, outputFilename)
+
+
 
 
 runUnlitPhase :: HscEnv -> FilePath -> FilePath -> IO FilePath
@@ -636,9 +632,11 @@ runHscPhase pipe_env hsc_env0 input_fn src_flavour = do
       hi_file = ml_hi_file location
       hie_file = ml_hie_file location
       dyn_o_file = ml_dyn_obj_file location
+      hifat_file = ml_hi_fat_file location
 
   src_hash <- getFileHash (basename <.> suff)
   hi_date <- modificationTimeIfExists hi_file
+  hifat_date <- modificationTimeIfExists hifat_file
   hie_date <- modificationTimeIfExists hie_file
   o_mod <- modificationTimeIfExists o_file
   dyn_o_mod <- modificationTimeIfExists dyn_o_file
@@ -663,6 +661,7 @@ runHscPhase pipe_env hsc_env0 input_fn src_flavour = do
                                 ms_parsed_mod   = Nothing,
                                 ms_iface_date   = hi_date,
                                 ms_hie_date     = hie_date,
+                                ms_hifat_date   = hifat_date,
                                 ms_ghc_prim_import = ghc_prim_imp,
                                 ms_textual_imps = imps,
                                 ms_srcimps      = src_imps }

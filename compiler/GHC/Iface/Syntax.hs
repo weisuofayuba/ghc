@@ -5,6 +5,8 @@
 
 
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
 
 module GHC.Iface.Syntax (
         module GHC.Iface.Type,
@@ -22,7 +24,7 @@ module GHC.Iface.Syntax (
         IfaceAxBranch(..),
         IfaceTyConParent(..),
         IfaceCompleteMatch(..),
-        IfaceLFInfo(..),
+        IfaceLFInfo(..), IfaceTopBndrInfo(..),
 
         -- * Binding names
         IfaceTopBndr,
@@ -113,6 +115,7 @@ putIfaceTopBndr bh name =
       UserData{ ud_put_binding_name = put_binding_name } ->
           --pprTrace "putIfaceTopBndr" (ppr name) $
           put_binding_name bh name
+
 
 data IfaceDecl
   = IfaceId { ifName      :: IfaceTopBndr,
@@ -553,7 +556,7 @@ data IfaceExpr
   | IfaceApp    IfaceExpr IfaceExpr
   | IfaceCase   IfaceExpr IfLclName [IfaceAlt]
   | IfaceECase  IfaceExpr IfaceType     -- See Note [Empty case alternatives]
-  | IfaceLet    IfaceBinding  IfaceExpr
+  | IfaceLet    (IfaceBinding IfaceLetBndr) IfaceExpr
   | IfaceCast   IfaceExpr IfaceCoercion
   | IfaceLit    Literal
   | IfaceLitRubbish IfaceType -- See GHC.Types.Literal
@@ -576,14 +579,17 @@ data IfaceConAlt = IfaceDefault
                  | IfaceDataAlt IfExtName
                  | IfaceLitAlt Literal
 
-data IfaceBinding
-  = IfaceNonRec IfaceLetBndr IfaceExpr
-  | IfaceRec    [(IfaceLetBndr, IfaceExpr)]
+data IfaceBinding b
+  = IfaceNonRec b IfaceExpr
+  | IfaceRec    [(b, IfaceExpr)]
+  deriving (Functor, Foldable, Traversable)
 
 -- IfaceLetBndr is like IfaceIdBndr, but has IdInfo too
 -- It's used for *non-top-level* let/rec binders
 -- See Note [IdInfo on nested let-bindings]
 data IfaceLetBndr = IfLetBndr IfLclName IfaceType IfaceIdInfo IfaceJoinInfo
+
+data IfaceTopBndrInfo = IfTopBndr (Either IfLclName IfaceTopBndr) IfaceType IfaceIdInfo IfaceIdDetails
 
 data IfaceJoinInfo = IfaceNotJoinPoint
                    | IfaceJoinPoint JoinArity
@@ -2455,7 +2461,7 @@ instance Binary IfaceConAlt where
             1 -> liftM IfaceDataAlt $ get bh
             _ -> liftM IfaceLitAlt  $ get bh
 
-instance Binary IfaceBinding where
+instance Binary b => Binary (IfaceBinding b) where
     put_ bh (IfaceNonRec aa ab) = putByte bh 0 >> put_ bh aa >> put_ bh ab
     put_ bh (IfaceRec ac)       = putByte bh 1 >> put_ bh ac
     get bh = do
@@ -2475,6 +2481,18 @@ instance Binary IfaceLetBndr where
                 c <- get bh
                 d <- get bh
                 return (IfLetBndr a b c d)
+
+instance Binary IfaceTopBndrInfo where
+    put_ bh (IfTopBndr a b c d) = do
+            put_ bh a
+            put_ bh b
+            put_ bh c
+            put_ bh d
+    get bh = do a <- get bh
+                b <- get bh
+                c <- get bh
+                d <- get bh
+                return (IfTopBndr a b c d)
 
 instance Binary IfaceJoinInfo where
     put_ bh IfaceNotJoinPoint = putByte bh 0
@@ -2633,7 +2651,7 @@ instance NFData IfaceExpr where
 instance NFData IfaceAlt where
   rnf (IfaceAlt con bndrs rhs) = rnf con `seq` rnf bndrs `seq` rnf rhs
 
-instance NFData IfaceBinding where
+instance NFData a => NFData (IfaceBinding a) where
   rnf = \case
     IfaceNonRec bndr e -> rnf bndr `seq` rnf e
     IfaceRec binds -> rnf binds

@@ -535,6 +535,7 @@ data DynFlags = DynFlags {
   dylibInstallName      :: Maybe String,
   hiDir                 :: Maybe String,
   hieDir                :: Maybe String,
+  hifatDir              :: Maybe String,
   stubDir               :: Maybe String,
   dumpDir               :: Maybe String,
 
@@ -542,6 +543,7 @@ data DynFlags = DynFlags {
   hcSuf                 :: String,
   hiSuf_                :: String,
   hieSuf                :: String,
+  hifatSuf              :: String,
 
   dynObjectSuf_         :: String,
   dynHiSuf_             :: String,
@@ -1169,6 +1171,7 @@ defaultDynFlags mySettings llvmConfig =
         dylibInstallName        = Nothing,
         hiDir                   = Nothing,
         hieDir                  = Nothing,
+        hifatDir                = Nothing,
         stubDir                 = Nothing,
         dumpDir                 = Nothing,
 
@@ -1176,6 +1179,7 @@ defaultDynFlags mySettings llvmConfig =
         hcSuf                   = phaseInputExt HCc,
         hiSuf_                  = "hi",
         hieSuf                  = "hie",
+        hifatSuf                = "hi-fat",
 
         dynObjectSuf_           = "dyn_" ++ phaseInputExt StopLn,
         dynHiSuf_               = "dyn_hi",
@@ -1678,10 +1682,10 @@ getVerbFlags dflags
   | verbosity dflags >= 4 = ["-v"]
   | otherwise             = []
 
-setObjectDir, setHiDir, setHieDir, setStubDir, setDumpDir, setOutputDir,
+setObjectDir, setHiDir, setHieDir, setStubDir, setDumpDir, setOutputDir, setHifatDir,
          setDynObjectSuf, setDynHiSuf,
          setDylibInstallName,
-         setObjectSuf, setHiSuf, setHieSuf, setHcSuf, parseDynLibLoaderMode,
+         setObjectSuf, setHiSuf, setHieSuf, setHifatSuf, setHcSuf, parseDynLibLoaderMode,
          setPgmP, addOptl, addOptc, addOptcxx, addOptP,
          addCmdlineFramework, addHaddockOpts, addGhciScript,
          setInteractivePrint
@@ -1692,6 +1696,7 @@ setOutputFile, setDynOutputFile, setOutputHi, setDynOutputHi, setDumpPrefixForce
 setObjectDir  f d = d { objectDir  = Just f}
 setHiDir      f d = d { hiDir      = Just f}
 setHieDir     f d = d { hieDir     = Just f}
+setHifatDir   f d = d { hifatDir   = Just f}
 setStubDir    f d = d { stubDir    = Just f
                       , includePaths = addGlobalInclude (includePaths d) [f] }
   -- -stubdir D adds an implicit -I D, so that gcc can find the _stub.h file
@@ -1703,11 +1708,13 @@ setOutputDir  f = setObjectDir f
                 . setHiDir f
                 . setStubDir f
                 . setDumpDir f
+                . setHifatDir f
 setDylibInstallName  f d = d { dylibInstallName = Just f}
 
 setObjectSuf    f d = d { objectSuf_    = f}
 setDynObjectSuf f d = d { dynObjectSuf_ = f}
 setHiSuf        f d = d { hiSuf_        = f}
+setHifatSuf     f d = d { hifatSuf      = f}
 setHieSuf       f d = d { hieSuf        = f}
 setDynHiSuf     f d = d { dynHiSuf_     = f}
 setHcSuf        f d = d { hcSuf         = f}
@@ -2239,9 +2246,11 @@ dynamic_flags_deps = [
   , make_ord_flag defGhcFlag "dynosuf"           (hasArg setDynObjectSuf)
   , make_ord_flag defGhcFlag "hcsuf"             (hasArg setHcSuf)
   , make_ord_flag defGhcFlag "hisuf"             (hasArg setHiSuf)
+  , make_ord_flag defGhcFlag "hifatsuf"          (hasArg setHifatSuf)
   , make_ord_flag defGhcFlag "hiesuf"            (hasArg setHieSuf)
   , make_ord_flag defGhcFlag "dynhisuf"          (hasArg setDynHiSuf)
   , make_ord_flag defGhcFlag "hidir"             (hasArg setHiDir)
+  , make_ord_flag defGhcFlag "hifatdir"          (hasArg setHifatDir)
   , make_ord_flag defGhcFlag "hiedir"            (hasArg setHieDir)
   , make_ord_flag defGhcFlag "tmpdir"            (hasArg setTmpDir)
   , make_ord_flag defGhcFlag "stubdir"           (hasArg setStubDir)
@@ -2252,6 +2261,9 @@ dynamic_flags_deps = [
 
   , make_ord_flag defGhcFlag "dynamic-too"
         (NoArg (setGeneralFlag Opt_BuildDynamicToo))
+
+  , make_ord_flag defGhcFlag "prefer-bytecode"
+        (NoArg (setGeneralFlag Opt_UseBytecodeRatherThanObjects))
 
         ------- Keeping temporary files -------------------------------------
      -- These can be singular (think ghc -c) or plural (think ghc --make)
@@ -3430,6 +3442,7 @@ fFlagsDeps = [
   flagSpec "strictness"                       Opt_Strictness,
   flagSpec "use-rpaths"                       Opt_RPath,
   flagSpec "write-interface"                  Opt_WriteInterface,
+  flagSpec "write-fat-interface"              Opt_WriteFatInterface,
   flagSpec "write-ide-info"                   Opt_WriteHie,
   flagSpec "unbox-small-strict-fields"        Opt_UnboxSmallStrictFields,
   flagSpec "unbox-strict-fields"              Opt_UnboxStrictFields,

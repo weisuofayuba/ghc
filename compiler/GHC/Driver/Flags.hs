@@ -376,6 +376,8 @@ data GeneralFlag
    | Opt_KeepOFiles
 
    | Opt_BuildDynamicToo
+   | Opt_WriteFatInterface
+   | Opt_UseBytecodeRatherThanObjects
 
    -- safe haskell flags
    | Opt_DistrustAllPackages

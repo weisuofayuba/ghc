@@ -123,6 +123,7 @@ import qualified Data.Set as Set
 
 import Data.Time        ( getCurrentTime )
 import GHC.Iface.Recomp
+import Control.Applicative
 
 -- Simpler type synonym for actions in the pipeline monad
 type P m = TPipelineClass TPhase m
@@ -246,7 +247,8 @@ compileOne' mHscMessage
    (iface, linkable) <- runPipeline (hsc_hooks hsc_env) pipeline
    -- See Note [ModDetails and --make mode]
    details <- initModDetails plugin_hsc_env upd_summary iface
-   return $! HomeModInfo iface details linkable
+   linkable' <- traverse (initFatIface plugin_hsc_env iface details) linkable
+   return $! HomeModInfo iface details linkable'
 
  where lcl_dflags  = ms_hspp_opts summary
        location    = ms_location summary
@@ -785,7 +787,8 @@ hscGenBackendPipeline pipe_env hsc_env mod_sum result = do
         let !linkable = LM unlinked_time
                                     (ms_mod mod_sum)
                                     [DotO final_o]
-        return (Just linkable)
+        -- If the backend step produced a bytecode linkable then use that rather than the object file linkable.
+        return (mlinkable <|> Just linkable)
   return (miface, final_linkable)
 
 asPipeline :: P m => Bool -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> m FilePath

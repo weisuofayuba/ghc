@@ -13,6 +13,7 @@ where
 import GHC.Prelude
 import GHC.Unit.Types
 import GHC.Utils.Outputable
+import GHC.Utils.Binary
 
 -- | Module Location
 --
@@ -62,10 +63,31 @@ data ModLocation
                 -- ^ Where the .dy file is, whether or not it exists
                 -- yet.
 
-        ml_hie_file  :: FilePath
+        ml_hie_file  :: FilePath,
                 -- ^ Where the .hie file is, whether or not it exists
                 -- yet.
+
+        ml_hi_fat_file  :: FilePath
+                -- ^ Where the .hi-fat file is, whether or not it exists
+                -- yet.
   } deriving Show
+
+instance Binary ModLocation where
+  put_ bh (ModLocation a b c d e f h) = do
+    put_ bh a
+    put_ bh b
+    put_ bh c
+    put_ bh d
+    put_ bh e
+    put_ bh f
+    put_ bh h
+  get bh = ModLocation <$> get bh
+                       <*> get bh
+                       <*> get bh
+                       <*> get bh
+                       <*> get bh
+                       <*> get bh
+                       <*> get bh
 
 instance Outputable ModLocation where
    ppr = text . show

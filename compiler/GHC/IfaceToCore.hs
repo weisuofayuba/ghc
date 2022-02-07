@@ -11,10 +11,12 @@ Type checking of type signatures in interface files
 {-# LANGUAGE FlexibleContexts #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
+{-# LANGUAGE TupleSections #-}
 
 module GHC.IfaceToCore (
         tcLookupImported_maybe,
         importDecl, checkWiredInTyCon, tcHiBootIface, typecheckIface,
+        typecheckFatIface,
         typecheckIfacesForMerging,
         typecheckIfaceForInstantiate,
         tcIfaceDecl, tcIfaceDecls,
@@ -22,7 +24,7 @@ module GHC.IfaceToCore (
         tcIfaceAnnotations, tcIfaceCompleteMatches,
         tcIfaceExpr,    -- Desired by HERMIT (#7683)
         tcIfaceGlobal,
-        tcIfaceOneShot
+        tcIfaceOneShot, tcTopIfaceBindings
  ) where
 
 import GHC.Prelude
@@ -113,6 +115,9 @@ import qualified GHC.Data.BooleanFormula as BF
 import Control.Monad
 import GHC.Parser.Annotation
 import GHC.Driver.Env.KnotVars
+import GHC.Unit.Module.FatIface
+import Data.IORef
+import Data.Foldable
 
 {-
 This module takes
@@ -228,6 +233,12 @@ typecheckIface iface
                               , md_complete_matches = complete_matches
                               }
     }
+
+typecheckFatIface :: IORef TypeEnv -> FatIface -> IfG [CoreBind]
+typecheckFatIface type_var (FatIface prepd_binding this_mod _) =
+  initIfaceLcl this_mod (text "typecheckFatIface") NotBoot $ do
+
+    tcTopIfaceBindings type_var prepd_binding
 
 {-
 ************************************************************************
@@ -886,6 +897,42 @@ tc_iface_decl _ _ (IfacePatSyn{ ifName = name
      tc_pr :: (IfExtName, Bool) -> IfL (Name, Type, Bool)
      tc_pr (nm, b) = do { id <- forkM (ppr nm) (tcIfaceExtId nm)
                         ; return (nm, idType id, b) }
+
+tcTopIfaceBindings :: IORef TypeEnv -> [IfaceBinding IfaceTopBndrInfo]
+          -> IfL [CoreBind]
+tcTopIfaceBindings ty_var ver_decls
+   = do
+      int <- mapM tcTopBinders  ver_decls
+      let all_ids :: [Id] = concatMap toList int
+      liftIO $ modifyIORef ty_var (flip extendTypeEnvList (map AnId all_ids))
+
+      extendIfaceIdEnv all_ids $ mapM (tc_iface_bindings) int
+
+tcTopBinders :: IfaceBinding IfaceTopBndrInfo -> IfL (IfaceBinding Id)
+tcTopBinders = traverse mk_top_id
+
+tc_iface_bindings ::  IfaceBinding Id -> IfL CoreBind
+tc_iface_bindings (IfaceNonRec b rhs) = do
+    NonRec b <$> tcIfaceExpr rhs
+tc_iface_bindings (IfaceRec bs) = do
+  rs <- mapM (\(b, rhs) -> (b,) <$> tcIfaceExpr rhs) bs
+  return (Rec rs)
+
+mk_top_id :: IfaceTopBndrInfo -> IfL Id
+mk_top_id (IfTopBndr raw_name iface_type _info details) = do
+  case raw_name of
+    Left lcl -> do
+      name <- newIfaceName (mkVarOccFS lcl)
+      ty <- tcIfaceType iface_type
+      details <- tcIdDetails ty details
+      info <- tcIdInfo False TopLevel name ty []
+      let new_id = (mkGlobalId details name ty info)
+      return new_id
+    Right name -> do
+      ty <- tcIfaceType iface_type
+      details <- tcIdDetails ty details
+      info <- tcIdInfo False TopLevel name ty []
+      return (mkGlobalId details name ty info)
 
 tcIfaceDecls :: Bool
           -> [(Fingerprint, IfaceDecl)]
@@ -1834,7 +1881,7 @@ tcIfaceGlobal name
 
         { mb_thing <- importDecl name   -- It's imported; go get it
         ; case mb_thing of
-            Failed err      -> failIfM err
+            Failed err      -> failIfM (ppr name <+> err)
             Succeeded thing -> return thing
         }}}
 

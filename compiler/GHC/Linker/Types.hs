@@ -41,6 +41,7 @@ import Control.Concurrent.MVar
 import Data.Time               ( UTCTime )
 import Data.Maybe
 import qualified Data.Map as M
+import GHC.Unit.Module.FatIface
 
 
 {- **********************************************************************
@@ -121,6 +122,7 @@ data Unlinked
   = DotO FilePath      -- ^ An object file (.o)
   | DotA FilePath      -- ^ Static archive file (.a)
   | DotDLL FilePath    -- ^ Dynamically linked library file (.so, .dll, .dylib)
+  | FI FatIface  -- ^ Serialised core which we can turn into BCOs (or object files)
   | BCOs CompiledByteCode
          [SptEntry]    -- ^ A byte-code object, lives only in memory. Also
                        -- carries some static pointer table entries which
@@ -133,6 +135,7 @@ instance Outputable Unlinked where
   ppr (DotA path)   = text "DotA" <+> text path
   ppr (DotDLL path) = text "DotDLL" <+> text path
   ppr (BCOs bcos spt) = text "BCOs" <+> ppr bcos <+> ppr spt
+  ppr (FI {})       = text "FI"
 
 -- | An entry to be inserted into a module's static pointer table.
 -- See Note [Grand plan for static forms] in "GHC.Iface.Tidy.StaticPtrTable".
@@ -170,6 +173,7 @@ nameOfObject_maybe :: Unlinked -> Maybe FilePath
 nameOfObject_maybe (DotO fn)   = Just fn
 nameOfObject_maybe (DotA fn)   = Just fn
 nameOfObject_maybe (DotDLL fn) = Just fn
+nameOfObject_maybe (FI {})     = Nothing
 nameOfObject_maybe (BCOs {})   = Nothing
 
 -- | Retrieve the filename of the linkable if possible. Panic if it is a byte-code object

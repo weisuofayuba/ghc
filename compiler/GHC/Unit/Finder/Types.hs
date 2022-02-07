@@ -94,6 +94,8 @@ data FinderOpts = FinderOpts
   , finder_reexportedModules :: Set.Set ModuleName
   , finder_hieDir :: Maybe FilePath
   , finder_hieSuf :: String
+  , finder_hifatDir :: Maybe FilePath
+  , finder_hifatSuf :: String
   , finder_hiDir :: Maybe FilePath
   , finder_hiSuf :: String
   , finder_dynHiSuf :: String

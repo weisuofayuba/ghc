@@ -3,6 +3,8 @@
 {-# LANGUAGE NondecreasingIndentation #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 {-# OPTIONS_GHC -fprof-auto-top #-}
 
@@ -45,11 +47,16 @@ module GHC.Driver.Main
     , Messager, batchMsg, batchMultiMsg
     , HscBackendAction (..), HscRecompStatus (..)
     , initModDetails
+    , initFatIface
     , hscMaybeWriteIface
     , hscCompileCmmFile
 
     , hscGenHardCode
     , hscInteractive
+    , mkCgInteractiveGuts
+    , CgInteractiveGuts
+    , generateByteCode
+    , generateFreshByteCode
 
     -- * Running passes separately
     , hscRecompStatus
@@ -129,7 +136,7 @@ import GHC.HsToCore
 
 import GHC.StgToByteCode    ( byteCodeGen )
 
-import GHC.IfaceToCore  ( typecheckIface )
+import GHC.IfaceToCore  ( typecheckIface, typecheckFatIface )
 
 import GHC.Iface.Load   ( ifaceStats, writeIface )
 import GHC.Iface.Make
@@ -233,7 +240,6 @@ import Control.Monad
 import Data.IORef
 import System.FilePath as FilePath
 import System.Directory
-import System.IO (fixIO)
 import qualified Data.Set as S
 import Data.Set (Set)
 import Data.Functor
@@ -244,6 +250,13 @@ import GHC.Driver.Env.KnotVars
 import GHC.Types.Name.Set (NonCaffySet)
 import GHC.Driver.GenerateCgIPEStub (generateCgIPEStub)
 import Data.List.NonEmpty (NonEmpty ((:|)))
+import GHC.Iface.Binary
+import GHC.Unit.Module.FatIface
+import GHC.CoreToIface
+import GHC.Types.TypeEnv
+import System.IO
+import {-# SOURCE #-} GHC.Driver.Pipeline
+import Data.Time
 
 
 {- **********************************************************************
@@ -667,7 +680,7 @@ hscDesugar :: HscEnv -> ModSummary -> TcGblEnv -> IO ModGuts
 hscDesugar hsc_env mod_summary tc_result =
     runHsc hsc_env $ hscDesugar' (ms_location mod_summary) tc_result
 
-hscDesugar' :: ModLocation -> TcGblEnv -> Hsc ModGuts
+hscDesugar' :: HasCallStack => ModLocation -> TcGblEnv -> Hsc ModGuts
 hscDesugar' mod_location tc_result = do
     hsc_env <- getHscEnv
     ioMsgMaybe $ hoistDsMessage $
@@ -756,8 +769,11 @@ hscRecompStatus
         -- No need for a linkable, we're good to go
         _ | NoBackend <- backend lcl_dflags   -> return (UpToDate, Nothing)
           -- Interpreter can use either already loaded bytecode or loaded object code
-          | not (backendProducesObject (backend lcl_dflags)) -> do
-              res <- liftIO $ checkByteCode old_linkable
+          | not (backendProducesObject (backend lcl_dflags))
+            || gopt Opt_UseBytecodeRatherThanObjects lcl_dflags -> do
+              -- MP: TODO - this doesn't trigger recompilation if we have a .o but not a hi-fat because we can use
+              -- the .o rather than .hi-fat with ghci.. not sure if this is good. Depends on what UseBytecodeRatherThanObjects means.
+              res <- liftIO $ checkByteCode hsc_env mod_summary old_linkable
               case res of
                 (_, Just{}) -> return res
                 _ -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
@@ -811,14 +827,29 @@ checkObjects dflags mb_old_linkable summary = do
 -- | Check to see if we can reuse the old linkable, by this point we will
 -- have just checked that the old interface matches up with the source hash, so
 -- no need to check that again here
-checkByteCode ::  Maybe Linkable -> IO (RecompileRequired, Maybe Linkable)
-checkByteCode mb_old_linkable =
+checkByteCode ::  HscEnv -> ModSummary -> Maybe Linkable -> IO (RecompileRequired, Maybe Linkable)
+checkByteCode hsc_env mod_sum mb_old_linkable =
   case mb_old_linkable of
     Just old_linkable
       | not (isObjectLinkable old_linkable)
       -> return $ (UpToDate, Just old_linkable)
-    _ -> return $ (RecompBecause MissingBytecode, Nothing)
+    _ -> loadByteCode hsc_env mod_sum
 
+--(UpToDate,) . Just <$> findObjectLinkable this_mod obj_fn obj_date
+-- TODO: MP could do better here and embed iface hash into the hifat file
+loadByteCode :: HscEnv -> ModSummary -> IO (RecompileRequired, Maybe Linkable)
+loadByteCode hsc_env mod_sum = do
+    let
+      mb_hifat_date = ms_hifat_date mod_sum
+      mb_if_date    = ms_iface_date mod_sum
+      hifat_fn      = ml_hi_fat_file (ms_location mod_sum)
+      this_mod      = ms_mod mod_sum
+    case (,) <$> mb_hifat_date <*> mb_if_date of
+      Just (obj_date, if_date)
+        | obj_date >= if_date -> do
+          fi <- readBinFatIface (hsc_NC hsc_env) hifat_fn
+          return (UpToDate, Just $ LM obj_date this_mod [FI fi])
+      _ -> return (RecompBecause MissingBytecode, Nothing)
 --------------------------------------------------------------
 -- Compilers
 --------------------------------------------------------------
@@ -827,9 +858,9 @@ checkByteCode mb_old_linkable =
 -- Knot tying!  See Note [Knot-tying typecheckIface]
 -- See Note [ModDetails and --make mode]
 initModDetails :: HscEnv -> ModSummary -> ModIface -> IO ModDetails
-initModDetails hsc_env mod_summary iface =
+initModDetails hsc_env _mod_summary iface =
   fixIO $ \details' -> do
-    let act hpt  = addToHpt hpt (ms_mod_name mod_summary)
+    let act hpt  = addToHpt hpt (moduleName $ mi_module iface)
                                 (HomeModInfo iface details' Nothing)
     let hsc_env' = hscUpdateHPT act hsc_env
     -- NB: This result is actually not that useful
@@ -837,6 +868,23 @@ initModDetails hsc_env mod_summary iface =
     -- any further typechecking.  It's much more useful
     -- in make mode, since this HMI will go into the HPT.
     genModDetails hsc_env' iface
+
+-- Hydrate any FatIface linkables into BCOs
+initFatIface :: HscEnv -> ModIface -> ModDetails -> Linkable -> IO Linkable
+initFatIface hsc_env mod_iface details (LM utc_time this_mod uls) = LM utc_time this_mod <$> concatMapM go uls
+  where
+    go (FI fi) = do
+        let act hpt  = addToHpt hpt (moduleName $ mi_module mod_iface)
+                                (HomeModInfo mod_iface details Nothing)
+        types_var <- newIORef (md_types details) -- (extendTypeEnvList emptyTypeEnv ((map ATyCon tycons) ++ concatMap (implicitTyThings . ATyCon) tycons))
+        let kv = knotVarsFromModuleEnv (mkModuleEnv [(this_mod, types_var)])
+        let hsc_env' = hscUpdateHPT act hsc_env { hsc_type_env_vars = kv }
+        core_binds <- initIfaceCheck (text "l") hsc_env' $ typecheckFatIface types_var fi
+        -- MP: TODO: NoStubs defo wrong
+        let cgi_guts = CgInteractiveGuts this_mod core_binds (typeEnvTyCons (md_types details)) NoStubs Nothing []
+        generateByteCode hsc_env cgi_guts (fi_mod_location fi)
+    go ul = return [ul]
+
 
 
 {-
@@ -893,7 +941,7 @@ See !5492 and #13586
 -- HscRecomp in turn will carry the information required to compute a interface
 -- when passed the result of the code generator. So all this can and is done at
 -- the call site of the backend code gen if it is run.
-hscDesugarAndSimplify :: ModSummary
+hscDesugarAndSimplify :: HasCallStack => ModSummary
        -> FrontendResult
        -> Messages GhcMessage
        -> Maybe Fingerprint
@@ -939,6 +987,11 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
                 -- See Note [Avoiding space leaks in toIface*] for details.
                 force (mkPartialIface hsc_env details summary simplified_guts)
 
+          --MP: TODO, we should be able to write a fat interface even when NoBackend is on
+          when (gopt Opt_WriteFatInterface dflags) $ liftIO $ do
+            createDirectoryIfMissing True (takeDirectory (ml_hi_fat_file $ ms_location summary))
+            writeBinFatIface QuietBinIFace (ml_hi_fat_file $ ms_location summary) (codeGutsToFatIface (ms_location summary) cg_guts)
+
           return HscRecomp { hscs_guts = cg_guts,
                              hscs_mod_location = ms_location summary,
                              hscs_partial_iface = partial_iface,
@@ -954,6 +1007,10 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
         liftIO $ hscMaybeWriteIface logger dflags True iface mb_old_iface_hash (ms_location summary)
 
         return $ HscUpdate iface
+
+
+codeGutsToFatIface :: ModLocation -> CgGuts -> FatIface
+codeGutsToFatIface ml CgGuts{..} = FatIface (map toIfaceTopBind cg_binds) cg_module ml
 
 {-
 Note [Writing interface files]
@@ -1662,22 +1719,35 @@ hscGenHardCode hsc_env cgguts location output_filename = do
             return (output_filename, stub_c_exists, foreign_fps, cg_infos)
 
 
+-- The part of CgGuts that we need for HscInteractive
+data CgInteractiveGuts = CgInteractiveGuts { cgi_module :: Module
+                                           , cgi_binds  :: CoreProgram
+                                           , cgi_tycons :: [TyCon]
+                                           , cgi_foreign :: ForeignStubs
+                                           , cgi_modBreaks ::  Maybe ModBreaks
+                                           , cgi_spt_entries :: [SptEntry]
+                                           }
+
+mkCgInteractiveGuts :: CgGuts -> CgInteractiveGuts
+mkCgInteractiveGuts CgGuts{cg_module, cg_binds, cg_tycons, cg_foreign, cg_modBreaks, cg_spt_entries}
+  = CgInteractiveGuts cg_module cg_binds cg_tycons cg_foreign cg_modBreaks cg_spt_entries
+
 hscInteractive :: HscEnv
-               -> CgGuts
+               -> CgInteractiveGuts
                -> ModLocation
                -> IO (Maybe FilePath, CompiledByteCode, [SptEntry])
 hscInteractive hsc_env cgguts location = do
     let dflags = hsc_dflags hsc_env
     let logger = hsc_logger hsc_env
     let tmpfs  = hsc_tmpfs hsc_env
-    let CgGuts{ -- This is the last use of the ModGuts in a compilation.
+    let CgInteractiveGuts{ -- This is the last use of the ModGuts in a compilation.
                 -- From now on, we just use the bits we need.
-               cg_module   = this_mod,
-               cg_binds    = core_binds,
-               cg_tycons   = tycons,
-               cg_foreign  = foreign_stubs,
-               cg_modBreaks = mod_breaks,
-               cg_spt_entries = spt_entries } = cgguts
+               cgi_module   = this_mod,
+               cgi_binds    = core_binds,
+               cgi_tycons   = tycons,
+               cgi_foreign  = foreign_stubs,
+               cgi_modBreaks = mod_breaks,
+               cgi_spt_entries = spt_entries } = cgguts
 
         data_tycons = filter isDataTyCon tycons
         -- cg_tycons includes newtypes, for the benefit of External Core,
@@ -1699,6 +1769,32 @@ hscInteractive hsc_env cgguts location = do
         <- outputForeignStubs logger tmpfs dflags (hsc_units hsc_env) this_mod location foreign_stubs
     return (istub_c_exists, comp_bc, spt_entries)
 
+generateByteCode :: HscEnv
+  -> CgInteractiveGuts
+  -> ModLocation
+  -> IO [Unlinked]
+generateByteCode hsc_env cgguts mod_location = do
+  (hasStub, comp_bc, spt_entries) <- hscInteractive hsc_env cgguts mod_location
+
+  stub_o <- case hasStub of
+            Nothing -> return []
+            Just stub_c -> do
+                stub_o <- compileForeign hsc_env LangC stub_c
+                return [DotO stub_o]
+
+  let hs_unlinked = [BCOs comp_bc spt_entries]
+  return (hs_unlinked ++ stub_o)
+
+generateFreshByteCode :: HscEnv
+  -> ModuleName
+  -> CgInteractiveGuts
+  -> ModLocation
+  -> IO Linkable
+generateFreshByteCode hsc_env mod_name cgguts mod_location = do
+  ul <- generateByteCode hsc_env cgguts mod_location
+  unlinked_time <- getCurrentTime
+  let !linkable = LM unlinked_time (mkHomeModule (hsc_home_unit hsc_env) mod_name) ul
+  return linkable
 ------------------------------
 
 hscCompileCmmFile :: HscEnv -> FilePath -> FilePath -> IO (Maybe FilePath)
@@ -1755,7 +1851,8 @@ hscCompileCmmFile hsc_env filename output_filename = runHsc hsc_env $ do
                           ml_obj_file = panic "hscCompileCmmFile: no obj file",
                           ml_dyn_obj_file = panic "hscCompileCmmFile: no dyn obj file",
                           ml_dyn_hi_file  = panic "hscCompileCmmFile: no dyn obj file",
-                          ml_hie_file = panic "hscCompileCmmFile: no hie file"}
+                          ml_hie_file = panic "hscCompileCmmFile: no hie file",
+                          ml_hi_fat_file = panic "hscCompileCmmFile: no hie_fat file"}
 
 -------------------- Stuff for new code gen ---------------------
 
@@ -1991,7 +2088,8 @@ hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
                                       ml_obj_file  = panic "hsDeclsWithLocation:ml_obj_file",
                                       ml_dyn_obj_file = panic "hsDeclsWithLocation:ml_dyn_obj_file",
                                       ml_dyn_hi_file = panic "hsDeclsWithLocation:ml_dyn_hi_file",
-                                      ml_hie_file  = panic "hsDeclsWithLocation:ml_hie_file" }
+                                      ml_hie_file  = panic "hsDeclsWithLocation:ml_hie_file",
+                                      ml_hi_fat_file = panic "hsDeclsWithLocation:ml_hi_fat_file"}
     ds_result <- hscDesugar' iNTERACTIVELoc tc_gblenv
 
     {- Simplify -}
@@ -2202,7 +2300,8 @@ hscCompileCoreExpr' hsc_env srcspan ds_expr
                                       ml_obj_file  = panic "hscCompileCoreExpr':ml_obj_file",
                                       ml_dyn_obj_file = panic "hscCompileCoreExpr': ml_obj_file",
                                       ml_dyn_hi_file  = panic "hscCompileCoreExpr': ml_dyn_hi_file",
-                                      ml_hie_file  = panic "hscCompileCoreExpr':ml_hie_file" }
+                                      ml_hie_file  = panic "hscCompileCoreExpr':ml_hie_file",
+                                      ml_hi_fat_file = panic "hscCompileCoreExpr': ml_hi_fat_file" }
 
          ; let ictxt = hsc_IC hsc_env
          ; (binding_id, stg_expr, _, _) <-

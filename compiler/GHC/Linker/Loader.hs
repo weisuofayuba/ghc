@@ -81,6 +81,7 @@ import GHC.Unit.Env
 import GHC.Unit.Finder
 import GHC.Unit.Module
 import GHC.Unit.Module.ModIface
+import GHC.Unit.Module.FatIface
 import GHC.Unit.Module.Deps
 import GHC.Unit.Home.ModInfo
 import GHC.Unit.State as Packages
@@ -890,6 +891,7 @@ getLinkDeps hsc_env pls replace_osuf span mods
             adjust_ul _ (DotA fp) = panic ("adjust_ul DotA " ++ show fp)
             adjust_ul _ (DotDLL fp) = panic ("adjust_ul DotDLL " ++ show fp)
             adjust_ul _ l@(BCOs {}) = return l
+            adjust_ul _ (FI (FatIface _ mod _))     = pprPanic "Unhydrated fat interface" (ppr mod)
 
 
 

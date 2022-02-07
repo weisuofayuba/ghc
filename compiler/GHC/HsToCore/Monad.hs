@@ -109,6 +109,7 @@ import qualified GHC.Data.Strict as Strict
 
 import Data.IORef
 import GHC.Driver.Env.KnotVars
+import GHC.Stack.Types
 
 {-
 ************************************************************************
@@ -218,7 +219,7 @@ initDsTc thing_inside
        }
 
 -- | Run a 'DsM' action inside the 'IO' monad.
-initDs :: HscEnv -> TcGblEnv -> DsM a -> IO (Messages DsMessage, Maybe a)
+initDs :: HasCallStack => HscEnv -> TcGblEnv -> DsM a -> IO (Messages DsMessage, Maybe a)
 initDs hsc_env tcg_env thing_inside
   = do { msg_var <- newIORef emptyMessages
        ; envs <- mkDsEnvsFromTcGbl hsc_env msg_var tcg_env
@@ -246,7 +247,7 @@ mkDsEnvsFromTcGbl hsc_env msg_var tcg_env
                            msg_var cc_st_var next_wrapper_num_var complete_matches
        }
 
-runDs :: HscEnv -> (DsGblEnv, DsLclEnv) -> DsM a -> IO (Messages DsMessage, Maybe a)
+runDs :: HasCallStack => HscEnv -> (DsGblEnv, DsLclEnv) -> DsM a -> IO (Messages DsMessage, Maybe a)
 runDs hsc_env (ds_gbl, ds_lcl) thing_inside
   = do { res    <- initTcRnIf 'd' hsc_env ds_gbl ds_lcl
                               (tryM thing_inside)
@@ -254,7 +255,7 @@ runDs hsc_env (ds_gbl, ds_lcl) thing_inside
        ; let final_res
                | errorsFound msgs = Nothing
                | Right r <- res   = Just r
-               | otherwise        = panic "initDs"
+               | otherwise        = pprPanic "initDs" (callStackDoc)
        ; return (msgs, final_res)
        }
 

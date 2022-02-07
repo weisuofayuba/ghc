@@ -72,6 +72,8 @@ data ModSummary
           -- See Note [When source is considered modified] and #9243
         ms_hie_date   :: Maybe UTCTime,
           -- ^ Timestamp of hie file, if we have one
+        ms_hifat_date   :: Maybe UTCTime,
+          -- ^ Timestamp of hie file, if we have one
         ms_srcimps      :: [(PkgQual, Located ModuleName)], -- FIXME: source imports are never from an external package, why do we allow PkgQual?
           -- ^ Source imports of the module
         ms_textual_imps :: [(PkgQual, Located ModuleName)],

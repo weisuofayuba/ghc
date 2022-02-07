@@ -36,6 +36,7 @@ module GHC.CoreToIface
     , toIfUnfolding
     , toIfaceTickish
     , toIfaceBind
+    , toIfaceTopBind
     , toIfaceAlt
     , toIfaceCon
     , toIfaceApp
@@ -439,6 +440,18 @@ toIfaceLetBndr id  = IfLetBndr (occNameFS (getOccName id))
   -- Put into the interface file any IdInfo that GHC.Core.Tidy.tidyLetBndr
   -- has left on the Id.  See Note [IdInfo on nested let-bindings] in GHC.Iface.Syntax
 
+toIfaceTopBndr :: Id -> IfaceTopBndrInfo
+toIfaceTopBndr id
+  = IfTopBndr get_name
+                 (toIfaceType (idType id))
+                 (toIfaceIdInfo (idInfo id))
+                 (toIfaceIdDetails (idDetails id))
+  where
+    name = getName id
+    get_name = if isExternalName name
+                  then Right (getName name)
+                  else Left (getOccFS name)
+
 toIfaceIdDetails :: IdDetails -> IfaceIdDetails
 toIfaceIdDetails VanillaId                      = IfVanillaId
 toIfaceIdDetails (DFunId {})                    = IfDFunId
@@ -577,9 +590,13 @@ toIfaceTickish (Breakpoint {})         = Nothing
    -- should not be serialised (#8333)
 
 ---------------------
-toIfaceBind :: Bind Id -> IfaceBinding
+toIfaceBind :: Bind Id -> IfaceBinding IfaceLetBndr
 toIfaceBind (NonRec b r) = IfaceNonRec (toIfaceLetBndr b) (toIfaceExpr r)
 toIfaceBind (Rec prs)    = IfaceRec [(toIfaceLetBndr b, toIfaceExpr r) | (b,r) <- prs]
+
+toIfaceTopBind :: Bind Id -> IfaceBinding IfaceTopBndrInfo
+toIfaceTopBind (NonRec b r) = IfaceNonRec (toIfaceTopBndr b) (toIfaceExpr r)
+toIfaceTopBind (Rec prs)    = IfaceRec [(toIfaceTopBndr b, toIfaceExpr r) | (b,r) <- prs]
 
 ---------------------
 toIfaceAlt :: CoreAlt -> IfaceAlt

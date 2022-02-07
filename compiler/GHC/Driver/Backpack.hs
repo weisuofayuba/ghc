@@ -772,6 +772,7 @@ summariseRequirement pn mod_name = do
     src_hash <- liftIO $ getFileHash (bkp_filename env)
     hi_timestamp <- liftIO $ modificationTimeIfExists (ml_hi_file location)
     hie_timestamp <- liftIO $ modificationTimeIfExists (ml_hie_file location)
+    hifat_timestamp <- liftIO $ modificationTimeIfExists (ml_hi_fat_file location)
     let loc = srcLocSpan (mkSrcLoc (mkFastString (bkp_filename env)) 1 1)
 
     let fc = hsc_FC hsc_env
@@ -788,6 +789,7 @@ summariseRequirement pn mod_name = do
         ms_dyn_obj_date = Nothing,
         ms_iface_date = hi_timestamp,
         ms_hie_date = hie_timestamp,
+        ms_hifat_date = hifat_timestamp,
         ms_srcimps = [],
         ms_textual_imps = ((,) NoPkgQual . noLoc) <$> extra_sig_imports,
         ms_ghc_prim_import = False,
@@ -860,6 +862,7 @@ hsModuleToModSummary home_keys pn hsc_src modname
     -- This duplicates a pile of logic in GHC.Driver.Make
     hi_timestamp <- liftIO $ modificationTimeIfExists (ml_hi_file location)
     hie_timestamp <- liftIO $ modificationTimeIfExists (ml_hie_file location)
+    hifat_timestamp <- liftIO $ modificationTimeIfExists (ml_hi_fat_file location)
 
     -- Also copied from 'getImports'
     let (src_idecls, ord_idecls) = partition ((== IsBoot) . ideclSource . unLoc) imps
@@ -915,7 +918,8 @@ hsModuleToModSummary home_keys pn hsc_src modname
             ms_obj_date = Nothing, -- TODO do this, but problem: hi_timestamp is BOGUS
             ms_dyn_obj_date = Nothing, -- TODO do this, but problem: hi_timestamp is BOGUS
             ms_iface_date = hi_timestamp,
-            ms_hie_date = hie_timestamp
+            ms_hie_date = hie_timestamp,
+            ms_hifat_date = hifat_timestamp
           }
 
     -- Now, what are the dependencies.

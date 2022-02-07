@@ -714,6 +714,7 @@ Library
         GHC.Unit.Module.ModDetails
         GHC.Unit.Module.ModGuts
         GHC.Unit.Module.ModIface
+        GHC.Unit.Module.FatIface
         GHC.Unit.Module.ModSummary
         GHC.Unit.Module.Name
         GHC.Unit.Module.Status

@@ -12,7 +12,9 @@
 module GHC.Iface.Binary (
         -- * Public API for interface file serialisation
         writeBinIface,
+        writeBinFatIface,
         readBinIface,
+        readBinFatIface,
         readBinIfaceHeader,
         getSymtabName,
         getDictFastString,
@@ -37,6 +39,7 @@ import GHC.Tc.Utils.Monad
 import GHC.Builtin.Utils   ( isKnownKeyName, lookupKnownKeyName )
 import GHC.Unit
 import GHC.Unit.Module.ModIface
+import GHC.Unit.Module.FatIface
 import GHC.Types.Name
 import GHC.Platform.Profile
 import GHC.Types.Unique.FM
@@ -148,6 +151,15 @@ readBinIface profile name_cache checkHiWay traceBinIface hi_path = do
       , mi_src_hash = src_hash
       }
 
+readBinFatIface
+  :: NameCache
+  -> FilePath
+  -> IO FatIface
+readBinFatIface name_cache fat_hi_path = do
+    bh <- Binary.readBinMem fat_hi_path
+    getWithUserData name_cache bh
+
+
 -- | This performs a get action after reading the dictionary and symbol
 -- table. It is necessary to run this before trying to deserialise any
 -- Names or FastStrings.
@@ -178,6 +190,16 @@ getWithUserData name_cache bh = do
 
     -- Read the interface file
     get bh
+
+-- | Write an interface file
+writeBinFatIface :: TraceBinIFace -> FilePath -> FatIface -> IO ()
+writeBinFatIface traceBinIface hi_path fat_iface = do
+    bh <- openBinMem initBinMemSize
+
+    putWithUserData traceBinIface bh fat_iface
+
+    -- And send the result to the file
+    writeBinMem bh hi_path
 
 -- | Write an interface file
 writeBinIface :: Profile -> TraceBinIFace -> FilePath -> ModIface -> IO ()
