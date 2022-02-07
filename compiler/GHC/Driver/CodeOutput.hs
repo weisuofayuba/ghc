@@ -18,20 +18,15 @@ import GHC.Prelude
 import GHC.Platform
 import GHC.ForeignSrcLang
 
-import GHC.CmmToAsm     ( nativeCodeGen )
-import GHC.CmmToLlvm    ( llvmCodeGen )
-
-import GHC.CmmToC           ( cmmToC )
 import GHC.Cmm.Lint         ( cmmLint )
 import GHC.Cmm
 import GHC.Cmm.CLabel
 
 import GHC.Driver.Session
 import GHC.Driver.Config.Finder    (initFinderOpts)
-import GHC.Driver.Config.CmmToAsm  (initNCGConfig)
-import GHC.Driver.Config.CmmToLlvm (initLlvmCgConfig)
 import GHC.Driver.Ppr
 import GHC.Driver.Backend
+import GHC.Driver.Backend.Refunctionalize
 
 import qualified GHC.Data.ShortText as ST
 import GHC.Data.Stream           ( Stream )
@@ -42,10 +37,7 @@ import GHC.Utils.TmpFs
 
 import GHC.Utils.Error
 import GHC.Utils.Outputable
-import GHC.Utils.Panic
 import GHC.Utils.Logger
-import GHC.Utils.Exception (bracket)
-import GHC.Utils.Ppr (Mode(..))
 
 import GHC.Unit
 import GHC.Unit.Finder      ( mkStubPaths )
@@ -53,13 +45,10 @@ import GHC.Unit.Finder      ( mkStubPaths )
 import GHC.Types.SrcLoc
 import GHC.Types.CostCentre
 import GHC.Types.ForeignStubs
-import GHC.Types.Unique.Supply ( mkSplitUniqSupply )
 
 import System.Directory
 import System.FilePath
-import System.IO
 import Data.Set (Set)
-import qualified Data.Set as Set
 
 {-
 ************************************************************************
@@ -302,8 +291,7 @@ outputForeignStubs logger tmpfs dflags unit_state mod location stubs
    cplusplus_ftr = "#if defined(__cplusplus)\n}\n#endif\n"
 
 
--- Don't use doOutput for dumping the f. export stubs
--- since it is more than likely that the stubs file will
+-- It is more than likely that the stubs file will
 -- turn out to be empty, in which case no file should be created.
 outputForeignStubs_help :: FilePath -> String -> String -> String -> IO Bool
 outputForeignStubs_help _fname ""      _header _footer = return False
@@ -381,5 +369,3 @@ ipInitCode do_info_table platform this_mod ents
                          | ipe <- ipes
                          ] ++ [text "NULL"])
       <> semi
-
-

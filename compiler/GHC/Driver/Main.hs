@@ -759,6 +759,26 @@ hscRecompStatus
     -- source file.
     --
     -- Save the interface that comes back from checkOldIface.
+    (recomp_iface_reqd, mb_checked_iface)
+          <- {-# SCC "checkOldIface" #-}
+             liftIO $ checkOldIface hsc_env mod_summary mb_old_iface
+      -- Check to see whether the expected build products already exist.
+      -- If they don't exists then we trigger recompilation.
+    let lcl_dflags = ms_hspp_opts mod_summary
+    (recomp_obj_reqd, mb_linkable) <-
+      case () of
+        -- No need for a linkable, we're good to go
+        _ | not (backendGeneratesCode (backend lcl_dflags)) -> return (UpToDate, Nothing)
+          -- Interpreter can use either already loaded bytecode or loaded object code
+          | not (backendWritesFiles (backend lcl_dflags)) -> do
+              res <- liftIO $ checkByteCode old_linkable
+              case res of
+                (_, Just{}) -> return res
+                _ -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
+          -- Need object files for making object files
+          | backendWritesFiles (backend lcl_dflags) -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
+          | otherwise -> pprPanic "hscRecompStatus" (text $ show $ backend lcl_dflags)
+    let recomp_reqd = recomp_iface_reqd `mappend` recomp_obj_reqd
     -- In one-shot mode we don't have the old iface until this
     -- point, when checkOldIface reads it from the disk.
     recomp_if_result
@@ -947,7 +967,7 @@ hscDesugarAndSimplify summary (FrontendTypecheck tc_result) tc_warnings mb_old_h
   -- interface file.
   case mb_desugar of
       -- Just cause we desugared doesn't mean we are generating code, see above.
-      Just desugared_guts | bcknd /= NoBackend -> do
+      Just desugared_guts | backendGeneratesCode bcknd -> do
           plugins <- liftIO $ readIORef (tcg_th_coreplugins tc_result)
           simplified_guts <- hscSimplify' plugins desugared_guts
 
@@ -1034,10 +1054,7 @@ hscMaybeWriteIface
   -> IO ()
 hscMaybeWriteIface logger dflags is_simple iface old_iface mod_location = do
     let force_write_interface = gopt Opt_WriteInterface dflags
-        write_interface = case backend dflags of
-                            NoBackend    -> False
-                            Interpreter  -> False
-                            _            -> True
+        write_interface = backendWritesFiles (backend dflags)
 
         write_iface dflags' iface =
           let !iface_name = if dynamicNow dflags' then ml_dyn_hi_file mod_location else ml_hi_file mod_location
@@ -2337,4 +2354,4 @@ showModuleIndex (i,n) = text "[" <> pad <> int i <> text " of " <> int n <> text
 writeInterfaceOnlyMode :: DynFlags -> Bool
 writeInterfaceOnlyMode dflags =
  gopt Opt_WriteInterface dflags &&
- NoBackend == backend dflags
+ not (backendGeneratesCode (backend dflags))
