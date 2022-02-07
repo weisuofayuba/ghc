@@ -11,14 +11,12 @@
 
 module GHC.HsToCore.Coverage
   ( CoverageConfig (..)
+  , TickishType (..)
   , addTicksToBinds
   , hpcInitCode
   ) where
 
 import GHC.Prelude as Prelude
-
-import GHC.Driver.Session
-import GHC.Driver.Backend
 
 import qualified GHC.Runtime.Interpreter as GHCi
 import GHCi.RemoteTypes
@@ -34,6 +32,8 @@ import GHC.Core.TyCon
 import GHC.Data.Maybe
 import GHC.Data.FastString
 import GHC.Data.Bag
+
+import GHC.Driver.Flags (DumpFlag(..))
 
 import GHC.Platform
 
@@ -56,11 +56,13 @@ import GHC.Types.CostCentre
 import GHC.Types.CostCentre.State
 import GHC.Types.ForeignStubs
 import GHC.Types.Tickish
+import GHC.Types.ProfAuto
 
 import Control.Monad
 import Data.List (isSuffixOf, intersperse)
 import Data.Array
 import Data.Time
+import Data.Traversable (for)
 import System.Directory
 
 import Trace.Hpc.Mix
@@ -79,16 +81,15 @@ import qualified Data.Set as Set
 -}
 
 data CoverageConfig = CoverageConfig
-  { coverageConfig_logger   :: Logger
-
-  -- FIXME: replace this with the specific fields of DynFlags we care about.
-  , coverageConfig_dynFlags :: DynFlags
-
-  , coverageConfig_mInterp  :: Maybe Interp
+  { coverage_passes       :: [TickishType]
+  , coverage_profAuto     :: ProfAuto
+  , coverage_countEntries :: Bool
+  , coverage_hpc          :: Maybe FilePath
   }
 
 addTicksToBinds
-        :: CoverageConfig
+        :: Logger
+        -> CoverageConfig
         -> Module
         -> ModLocation          -- ... off the current module
         -> NameSet              -- Exported Ids.  When we call addTicksToBinds,
@@ -98,13 +99,9 @@ addTicksToBinds
         -> LHsBinds GhcTc
         -> IO (LHsBinds GhcTc, HpcInfo, Maybe ModBreaks)
 
-addTicksToBinds (CoverageConfig
-                 { coverageConfig_logger = logger
-                 , coverageConfig_dynFlags = dflags
-                 , coverageConfig_mInterp = m_interp
-                 })
+addTicksToBinds logger cfg
                 mod mod_loc exports tyCons binds
-  | let passes = coveragePasses dflags
+  | let passes = coverage_passes cfg
   , not (null passes)
   , Just orig_file <- ml_hs_file mod_loc = do
 
@@ -114,7 +111,7 @@ addTicksToBinds (CoverageConfig
             let env = TTE
                       { fileName     = mkFastString orig_file2
                       , declPath     = []
-                      , tte_countEntries = gopt Opt_ProfCountEntries dflags
+                      , tte_countEntries = coverage_countEntries cfg
                       , exports      = exports
                       , inlines      = emptyVarSet
                       , inScope      = emptyVarSet
@@ -123,7 +120,7 @@ addTicksToBinds (CoverageConfig
                                                              RealSrcSpan l _ -> Just l
                                                              UnhelpfulSpan _ -> Nothing)
                                                 tyCons
-                      , density      = mkDensity tickish dflags
+                      , density      = mkDensity tickish $ coverage_profAuto cfg
                       , this_mod     = mod
                       , tickishType  = tickish
                       }
@@ -139,8 +136,11 @@ addTicksToBinds (CoverageConfig
 
      let tickCount = tickBoxCount st
          entries = reverse $ mixEntries st
-     hashNo <- writeMixEntries dflags mod tickCount entries orig_file2
-     modBreaks <- mkModBreaks m_interp dflags mod tickCount entries
+     hashNo <- case coverage_hpc cfg of
+       Just hpc_dir -> writeMixEntries hpc_dir mod tickCount entries orig_file2
+       Nothing -> return 0
+     modBreaks <- for (listToMaybe $ [i | Breakpoints i <- passes ]) $
+       \interp -> mkModBreaks interp mod tickCount entries
 
      putDumpFileMaybe logger Opt_D_dump_ticked "HPC" FormatHaskell
        (pprLHsBinds binds1)
@@ -162,24 +162,22 @@ guessSourceFile binds orig_file =
         _ -> orig_file
 
 
-mkModBreaks :: Maybe Interp -> DynFlags -> Module -> Int -> [MixEntry_] -> IO (Maybe ModBreaks)
-mkModBreaks m_interp dflags mod count entries
-  | Just interp <- m_interp
-  , breakpointsEnabled dflags = do
+mkModBreaks :: Interp -> Module -> Int -> [MixEntry_] -> IO ModBreaks
+mkModBreaks interp mod count entries
+  = do
     breakArray <- GHCi.newBreakArray interp (length entries)
     ccs <- mkCCSArray interp mod count entries
     let
            locsTicks  = listArray (0,count-1) [ span  | (span,_,_,_)  <- entries ]
            varsTicks  = listArray (0,count-1) [ vars  | (_,_,vars,_)  <- entries ]
            declsTicks = listArray (0,count-1) [ decls | (_,decls,_,_) <- entries ]
-    return $ Just $ emptyModBreaks
+    return $ emptyModBreaks
                        { modBreaks_flags = breakArray
                        , modBreaks_locs  = locsTicks
                        , modBreaks_vars  = varsTicks
                        , modBreaks_decls = declsTicks
                        , modBreaks_ccs   = ccs
                        }
-  | otherwise = return Nothing
 
 mkCCSArray
   :: Interp -> Module -> Int -> [MixEntry_]
@@ -197,12 +195,10 @@ mkCCSArray interp modul count entries
 
 
 writeMixEntries
-  :: DynFlags -> Module -> Int -> [MixEntry_] -> FilePath -> IO Int
-writeMixEntries dflags mod count entries filename
-  | not (gopt Opt_Hpc dflags) = return 0
-  | otherwise   = do
+  :: FilePath -> Module -> Int -> [MixEntry_] -> FilePath -> IO Int
+writeMixEntries hpc_dir mod count entries filename
+  = do
         let
-            hpc_dir = hpcDir dflags
             mod_name = moduleNameString (moduleName mod)
 
             hpc_mod_dir
@@ -236,13 +232,13 @@ data TickDensity
   | TickCallSites         -- for stack tracing
   deriving Eq
 
-mkDensity :: TickishType -> DynFlags -> TickDensity
-mkDensity tickish dflags = case tickish of
+mkDensity :: TickishType -> ProfAuto -> TickDensity
+mkDensity tickish pa = case tickish of
   HpcTicks             -> TickForCoverage
   SourceNotes          -> TickForCoverage
-  Breakpoints          -> TickForBreakPoints
+  Breakpoints _        -> TickForBreakPoints
   ProfNotes ->
-    case profAuto dflags of
+    case pa of
       ProfAutoAll      -> TickAllFunctions
       ProfAutoTop      -> TickTopFunctions
       ProfAutoExports  -> TickExportedFunctions
@@ -322,7 +318,7 @@ addTickLHsBind (L pos (funBind@(FunBind { fun_id = L _ id }))) = do
 
   -- See Note [inline sccs]
   tickish <- tickishType `liftM` getEnv
-  if inline && tickish == ProfNotes then return (L pos funBind) else do
+  case tickish of { ProfNotes | inline -> return (L pos funBind); _ -> do
 
   (fvs, mg) <-
         getFreeVars $
@@ -349,6 +345,7 @@ addTickLHsBind (L pos (funBind@(FunBind { fun_id = L _ id }))) = do
   let mbCons = maybe Prelude.id (:)
   return $ L pos $ funBind { fun_matches = mg
                            , fun_tick = tick `mbCons` fun_tick funBind }
+  }
 
    where
    -- a binding is a simple pattern binding if it is a funbind with
@@ -1064,26 +1061,11 @@ data TickTransEnv = TTE { fileName     :: FastString
 
 --      deriving Show
 
-data TickishType = ProfNotes | HpcTicks | Breakpoints | SourceNotes
-                 deriving (Eq)
-
-sourceNotesEnabled :: DynFlags -> Bool
-sourceNotesEnabled dflags =
-  (debugLevel dflags > 0) || (gopt Opt_InfoTableMap dflags)
-
-coveragePasses :: DynFlags -> [TickishType]
-coveragePasses dflags =
-    ifa (breakpointsEnabled dflags)          Breakpoints $
-    ifa (gopt Opt_Hpc dflags)                HpcTicks $
-    ifa (sccProfilingEnabled dflags &&
-         profAuto dflags /= NoProfAuto)      ProfNotes $
-    ifa (sourceNotesEnabled dflags)          SourceNotes []
-  where ifa f x xs | f         = x:xs
-                   | otherwise = xs
-
--- | Should we produce 'Breakpoint' ticks?
-breakpointsEnabled :: DynFlags -> Bool
-breakpointsEnabled dflags = backend dflags == Interpreter
+data TickishType
+  = ProfNotes
+  | HpcTicks
+  | Breakpoints Interp
+  | SourceNotes
 
 -- | Tickishs that only make sense when their source code location
 -- refers to the current file. This might not always be true due to
@@ -1257,7 +1239,7 @@ mkTickish boxLabel countEntries topOnly pos fvs decl_path = do
           count = countEntries && tte_countEntries env
       return $ ProfNote cc count True{-scopes-}
 
-    Breakpoints -> Breakpoint noExtField <$> addMixEntry me <*> pure ids
+    Breakpoints _ -> Breakpoint noExtField <$> addMixEntry me <*> pure ids
 
     SourceNotes | RealSrcSpan pos' _ <- pos ->
       return $ SourceNote pos' cc_name

@@ -20,6 +20,7 @@ import GHC.Prelude
 
 import GHC.Driver.Session
 import GHC.Driver.Config
+import GHC.Driver.Config.HsToCore.Coverage
 import GHC.Driver.Env
 import GHC.Driver.Backend
 import GHC.Driver.Plugins
@@ -150,11 +151,10 @@ deSugar hsc_env
         ; (binds_cvr, ds_hpc_info, modBreaks)
                          <- if not (isHsBootOrSig hsc_src)
                               then addTicksToBinds
-                                       (CoverageConfig
-                                        { coverageConfig_logger = hsc_logger hsc_env
-                                        , coverageConfig_dynFlags = hsc_dflags hsc_env
-                                        , coverageConfig_mInterp = hsc_interp hsc_env
-                                        })
+                                       (hsc_logger hsc_env)
+                                       (initCoverageConfig
+                                         (hsc_interp hsc_env)
+                                         (hsc_dflags hsc_env))
                                        mod mod_loc
                                        export_set (typeEnvTyCons type_env) binds
                               else return (binds, hpcInfo, Nothing)
