@@ -323,6 +323,14 @@ Redirecting the compilation output(s)
     or ``ghc -c``), this directory is where GHC looks into to find extended
     interface files.
 
+.. ghc-flag:: -hifatdir ⟨dir⟩
+    :shortdesc: set directory for extended interface files
+    :type: dynamic
+    :category:
+
+    Todo
+
+
 .. ghc-flag:: -stubdir ⟨dir⟩
     :shortdesc: redirect FFI stub files
     :type: dynamic
@@ -410,6 +418,13 @@ Redirecting the compilation output(s)
 
     The ``-hiesuf`` ⟨suffix⟩ will change the ``.hie`` file suffix for
     extended interface files to whatever you specify.
+
+.. ghc-flag:: -hifatsuf ⟨suffix⟩
+    :shortdesc: set the suffix to use for extended interface files
+    :type: dynamic
+
+    TODOdt
+
 
 .. ghc-flag:: -hcsuf ⟨suffix⟩
     :shortdesc: set the suffix to use for intermediate C files

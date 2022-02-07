@@ -636,6 +636,13 @@ Options affecting code generation
     useful if you want to type check over multiple runs of GHC without
     compiling dependencies.
 
+.. ghc-flag:: -fwrite-fat-interface
+    :shortdesc: Always write interface files
+    :type: dynamic
+    :category: codegen
+
+    TODO
+
 .. ghc-flag:: -fobject-code
     :shortdesc: Generate object code
     :type: dynamic
@@ -745,6 +752,13 @@ Options affecting code generation
     :ghc-flag:`-fno-expose-internal-symbols <-fexpose-internal-symbols>`
     suppresses all non-global symbol table entries, resulting in smaller object
     file sizes at the expense of debuggability.
+
+
+.. ghc-flag:: -prefer-bytecode
+    :shortdesc: Generate and use bytecode rather than object to run TH splices
+    :type: dynamic
+    :category: codegen
+
 
 .. _options-linker:
 
