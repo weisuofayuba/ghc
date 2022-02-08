@@ -373,6 +373,9 @@ Library
         GHC.Driver.Config.Cmm
         GHC.Driver.Config.CmmToAsm
         GHC.Driver.Config.CmmToLlvm
+        GHC.Driver.Config.Core.Opt.Arity
+        GHC.Driver.Config.Core.Opt.WorkWrap
+        GHC.Driver.Config.Core.Rules
         GHC.Driver.Config.Diagnostic
         GHC.Driver.Config.Finder
         GHC.Driver.Config.HsToCore

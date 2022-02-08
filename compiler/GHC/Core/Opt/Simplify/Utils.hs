@@ -60,6 +60,8 @@ import GHC.Core.DataCon ( dataConWorkId, isNullaryRepDataCon )
 import GHC.Core.Multiplicity
 import GHC.Core.Opt.ConstantFold
 
+import GHC.Driver.Config.Core.Opt.Arity
+
 import GHC.Types.Name
 import GHC.Types.Id
 import GHC.Types.Id.Info
@@ -1624,7 +1626,9 @@ mkLam env bndrs body cont
       | not (contIsRhs cont)   -- See Note [Eta expanding lambdas]
       , sm_eta_expand mode
       , any isRuntimeVar bndrs
-      , let body_arity = {-# SCC "eta" #-} exprEtaExpandArity dflags body
+      , let body_arity = {-# SCC "eta" #-} exprEtaExpandArity
+              (initArityOpts dflags)
+              body
       , expandableArityType body_arity
       = do { tick (EtaExpansion (head bndrs))
            ; let res = {-# SCC "eta3" #-}
@@ -1739,7 +1743,9 @@ tryEtaExpandRhs env bndr rhs
     dflags    = sm_dflags mode
     old_arity = exprArity rhs
 
-    arity_type = findRhsArity dflags bndr rhs old_arity
+    arity_type = findRhsArity
+                   (initArityOpts dflags)
+                   bndr rhs old_arity
                  `maxWithArity` idCallArity bndr
     new_arity = arityTypeArity arity_type
 

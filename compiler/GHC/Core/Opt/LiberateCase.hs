@@ -9,7 +9,6 @@ module GHC.Core.Opt.LiberateCase ( liberateCase ) where
 
 import GHC.Prelude
 
-import GHC.Driver.Session
 import GHC.Core
 import GHC.Core.Unfold
 import GHC.Builtin.Types ( unitDataConId )
@@ -101,8 +100,14 @@ and the level of @h@ is zero (NB not one).
 ************************************************************************
 -}
 
-liberateCase :: DynFlags -> CoreProgram -> CoreProgram
-liberateCase dflags binds = do_prog (initLiberateCaseEnv dflags) binds
+liberateCase
+  :: UnfoldingOpts
+  -> Maybe Int
+     -- ^ Bomb-out size for deciding if potential liberatees are too
+     -- big.
+  -> CoreProgram
+  -> CoreProgram
+liberateCase uf_opts threshold binds = do_prog (initLiberateCaseEnv uf_opts threshold) binds
   where
     do_prog _   [] = []
     do_prog env (bind:binds) = bind' : do_prog env' binds
@@ -110,10 +115,10 @@ liberateCase dflags binds = do_prog (initLiberateCaseEnv dflags) binds
                                (env', bind') = libCaseBind env bind
 
 
-initLiberateCaseEnv :: DynFlags -> LibCaseEnv
-initLiberateCaseEnv dflags = LibCaseEnv
-   { lc_threshold = liberateCaseThreshold dflags
-   , lc_uf_opts   = unfoldingOpts dflags
+initLiberateCaseEnv :: UnfoldingOpts -> Maybe Int -> LibCaseEnv
+initLiberateCaseEnv uf_opts threshold = LibCaseEnv
+   { lc_threshold = threshold
+   , lc_uf_opts   = uf_opts
    , lc_lvl       = 0
    , lc_lvl_env   = emptyVarEnv
    , lc_rec_env   = emptyVarEnv
