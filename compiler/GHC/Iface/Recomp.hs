@@ -20,7 +20,7 @@ where
 
 import GHC.Prelude
 
-import GHC.Driver.Backend
+import GHC.Driver.Backend.Types
 import GHC.Driver.Config.Finder
 import GHC.Driver.Env
 import GHC.Driver.Session
@@ -323,7 +323,7 @@ check_old_iface hsc_env mod_summary maybe_iface
             -- If the source has changed and we're in interactive mode,
             -- avoid reading an interface; just return the one we might
             -- have been supplied with.
-            True | not (backendProducesObject $ backend dflags) ->
+            True | not (backendWritesFiles $ backend dflags) ->
                 return $ OutOfDateItem MustCompile maybe_iface
 
             -- Try and read the old interface for the current module

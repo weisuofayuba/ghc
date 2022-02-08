@@ -18,15 +18,20 @@ import GHC.Prelude
 import GHC.Platform
 import GHC.ForeignSrcLang
 
+import GHC.CmmToAsm     ( nativeCodeGen )
+import GHC.CmmToLlvm    ( llvmCodeGen )
+
+import GHC.CmmToC           ( cmmToC )
 import GHC.Cmm.Lint         ( cmmLint )
 import GHC.Cmm
 import GHC.Cmm.CLabel
 
 import GHC.Driver.Session
 import GHC.Driver.Config.Finder    (initFinderOpts)
+import GHC.Driver.Config.CmmToAsm  (initNCGConfig)
+import GHC.Driver.Config.CmmToLlvm (initLlvmCgConfig)
 import GHC.Driver.Ppr
 import GHC.Driver.Backend
-import GHC.Driver.Backend.Refunctionalize
 
 import qualified GHC.Data.ShortText as ST
 import GHC.Data.Stream           ( Stream )
@@ -38,6 +43,8 @@ import GHC.Utils.TmpFs
 import GHC.Utils.Error
 import GHC.Utils.Outputable
 import GHC.Utils.Logger
+import GHC.Utils.Exception (bracket)
+import GHC.Utils.Ppr (Mode(..))
 
 import GHC.Unit
 import GHC.Unit.Finder      ( mkStubPaths )
@@ -45,10 +52,13 @@ import GHC.Unit.Finder      ( mkStubPaths )
 import GHC.Types.SrcLoc
 import GHC.Types.CostCentre
 import GHC.Types.ForeignStubs
+import GHC.Types.Unique.Supply ( mkSplitUniqSupply )
 
 import System.Directory
 import System.FilePath
+import System.IO
 import Data.Set (Set)
+import qualified Data.Set as Set
 
 {-
 ************************************************************************
@@ -107,13 +117,11 @@ codeOutput logger tmpfs dflags unit_state this_mod filenm location genForeignStu
                   ; emitInitializerDecls this_mod stubs
                   ; return (stubs, a) }
 
-        ; (stubs, a) <- case backend dflags of
-                 NCG         -> outputAsm logger dflags this_mod location filenm
-                                          final_stream
-                 ViaC        -> outputC logger dflags filenm final_stream pkg_deps
-                 LLVM        -> outputLlvm logger dflags filenm final_stream
-                 Interpreter -> panic "codeOutput: Interpreter"
-                 NoBackend   -> panic "codeOutput: NoBackend"
+        ; (stubs, a) <- case backendCodeOutput (backend dflags) of
+                 NcgCodeOutput  -> outputAsm logger dflags this_mod location filenm
+                                             final_stream
+                 ViaCCodeOutput -> outputC logger dflags filenm final_stream pkg_deps
+                 LlvmCodeOutput -> outputLlvm logger dflags filenm final_stream
         ; stubs_exist <- outputForeignStubs logger tmpfs dflags unit_state this_mod location stubs
         ; return (filenm, stubs_exist, foreign_fps, a)
         }

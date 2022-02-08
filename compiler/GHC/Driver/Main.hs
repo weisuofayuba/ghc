@@ -759,26 +759,6 @@ hscRecompStatus
     -- source file.
     --
     -- Save the interface that comes back from checkOldIface.
-    (recomp_iface_reqd, mb_checked_iface)
-          <- {-# SCC "checkOldIface" #-}
-             liftIO $ checkOldIface hsc_env mod_summary mb_old_iface
-      -- Check to see whether the expected build products already exist.
-      -- If they don't exists then we trigger recompilation.
-    let lcl_dflags = ms_hspp_opts mod_summary
-    (recomp_obj_reqd, mb_linkable) <-
-      case () of
-        -- No need for a linkable, we're good to go
-        _ | not (backendGeneratesCode (backend lcl_dflags)) -> return (UpToDate, Nothing)
-          -- Interpreter can use either already loaded bytecode or loaded object code
-          | not (backendWritesFiles (backend lcl_dflags)) -> do
-              res <- liftIO $ checkByteCode old_linkable
-              case res of
-                (_, Just{}) -> return res
-                _ -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
-          -- Need object files for making object files
-          | backendWritesFiles (backend lcl_dflags) -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
-          | otherwise -> pprPanic "hscRecompStatus" (text $ show $ backend lcl_dflags)
-    let recomp_reqd = recomp_iface_reqd `mappend` recomp_obj_reqd
     -- In one-shot mode we don't have the old iface until this
     -- point, when checkOldIface reads it from the disk.
     recomp_if_result
@@ -790,24 +770,24 @@ hscRecompStatus
         return $ HscRecompNeeded $ fmap (mi_iface_hash . mi_final_exts) mb_checked_iface
       UpToDateItem checked_iface -> do
         let lcl_dflags = ms_hspp_opts mod_summary
-        case backend lcl_dflags of
-          -- No need for a linkable, we're good to go
-          NoBackend -> do
-            msg $ UpToDate
-            return $ HscUpToDate checked_iface Nothing
+        if not (backendGeneratesCode (backend lcl_dflags)) then
+            -- No need for a linkable, we're good to go
+          do msg $ UpToDate
+             return $ HscUpToDate checked_iface Nothing
+        else
           -- Do need linkable
-          _ -> do
+          do
             -- Check to see whether the expected build products already exist.
             -- If they don't exists then we trigger recompilation.
             recomp_linkable_result <- case () of
                -- Interpreter can use either already loaded bytecode or loaded object code
-               _ | Interpreter <- backend lcl_dflags -> do
+               _ | backendCanReuseLoadedCode (backend lcl_dflags) -> do
                      let res = checkByteCode old_linkable
                      case res of
                        UpToDateItem _ -> pure res
                        _ -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
                  -- Need object files for making object files
-                 | backendProducesObject (backend lcl_dflags) -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
+                 | backendWritesFiles (backend lcl_dflags) -> liftIO $ checkObjects lcl_dflags old_linkable mod_summary
                  | otherwise -> pprPanic "hscRecompStatus" (text $ show $ backend lcl_dflags)
             case recomp_linkable_result of
               UpToDateItem linkable -> do

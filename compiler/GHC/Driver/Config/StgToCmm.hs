@@ -79,7 +79,3 @@ initStgToCmmConfig dflags mod = StgToCmmConfig
           vec_err = case backendSimdValidity (backend dflags) of
                       IsValid -> Nothing
                       NotValid msg -> Just msg
-          bin_blob_thresh = if backendSupportsEmbeddedBlobs (backend dflags) then
-                                binBlobThreshold dflags
-                            else
-                                0 -- suppress them entirely

@@ -4784,7 +4784,7 @@ makeDynFlagsConsistent dflags
  | backendForcesOptimization0 (backend dflags)
  , let (dflags', changed) = updOptLevelChanged 0 dflags
  , changed
-    = loop dflags' ("Optimization flags conflict with the " ++
+    = loop dflags' ("Optimization flags are incompatible with the " ++
                    backendDescription (backend dflags) ++
                                           "; optimization flags ignored.")
 

@@ -29,7 +29,6 @@ import GHC.Unit.Module.Status
 import GHC.Unit.Module.ModIface
 import GHC.Linker.Types
 import GHC.Driver.Backend
-import GHC.Driver.Backend.Refunctionalize
 import GHC.Driver.Session
 import GHC.Driver.CmdLine
 import GHC.Unit.Module.ModSummary
@@ -49,6 +48,7 @@ import GHC.Unit.Env
 import GHC.Utils.Error
 import Data.Maybe
 import GHC.CmmToLlvm.Mangler
+import GHC.CmmToLlvm.LlvmVersion
 import GHC.SysTools
 import GHC.Utils.Panic.Plain
 import System.Directory
@@ -335,6 +335,29 @@ runAsPhase with_cpp pipe_env hsc_env location input_fn = do
         runAssembler input_fn output_fn
 
         return output_fn
+
+applyAssemblerInfoGetter
+    :: DefunctionalizedAssemblerInfoGetter
+    -> Logger -> DynFlags -> Platform -> IO CompilerInfo
+applyAssemblerInfoGetter StandardAssemblerInfoGetter logger dflags _platform =
+    getAssemblerInfo logger dflags
+applyAssemblerInfoGetter DarwinClangAssemblerInfoGetter logger dflags platform =
+    if platformOS platform == OSDarwin then
+        pure Clang
+    else
+        getAssemblerInfo logger dflags
+
+applyAssemblerProg
+    :: DefunctionalizedAssemblerProg
+    -> Logger -> DynFlags -> Platform -> [Option] -> IO ()
+applyAssemblerProg StandardAssemblerProg logger dflags _platform =
+    runAs logger dflags
+applyAssemblerProg DarwinClangAssemblerProg logger dflags platform =
+    if platformOS platform == OSDarwin then
+        runClang logger dflags
+    else
+        runAs logger dflags
+
 
 
 runCcPhase :: Phase -> PipeEnv -> HscEnv -> FilePath -> IO FilePath
@@ -1040,6 +1063,19 @@ doCpp logger tmpfs dflags unit_env raw input_fn output_fn = do
                        , GHC.SysTools.Option     "-o"
                        , GHC.SysTools.FileOption "" output_fn
                        ])
+
+applyCDefs :: DefunctionalizedCDefs -> Logger -> DynFlags -> IO [String]
+applyCDefs NoCDefs _ _ = return []
+applyCDefs LlvmCDefs logger dflags = do
+    llvmVer <- figureLlvmVersion logger dflags
+    return $ case fmap llvmVersionList llvmVer of
+               Just [m] -> [ "-D__GLASGOW_HASKELL_LLVM__=" ++ format (m,0) ]
+               Just (m:n:_) -> [ "-D__GLASGOW_HASKELL_LLVM__=" ++ format (m,n) ]
+               _ -> []
+  where
+    format (major, minor)
+      | minor >= 100 = error "backendCDefs: Unsupported minor version"
+      | otherwise = show (100 * major + minor :: Int) -- Contract is Int
 
 
 -- | What phase to run after one of the backend code generators has run

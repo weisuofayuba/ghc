@@ -10,9 +10,15 @@ module GHC.Driver.Backend
    , viaCBackend
    , interpreterBackend
    , noBackend
+
    , platformDefaultBackend
    , platformNcgSupported
    , module GHC.Driver.Backend.Types
+
+   , backendValidityOfCImport
+   , backendValidityOfCExport
+
+   , allBackends
    )
 
 where
@@ -26,7 +32,6 @@ import GHC.Driver.Phases
 
 
 import GHC.Utils.Error
-import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
 import GHC.Driver.Pipeline.Monad
@@ -74,6 +79,7 @@ prototypeBackend, ncgBackend, llvmBackend, viaCBackend, interpreterBackend, noBa
 prototypeBackend =
     Backend { backendDescription = missing "Description"
             , backendWritesFiles = True
+            , backendCanReuseLoadedCode = False
             , backendPipelineOutput = Persistent
             , backendGeneratesCode = True
             , backendSupportsInterfaceWriting = True
@@ -99,8 +105,8 @@ prototypeBackend =
             , backendSpecialModuleSource = const Nothing
 
             , backendSupportsHpc = True
-            , backendValidityOfCImport = IsValid
-            , backendValidityOfCExport = IsValid
+            , backendSupportsCImport = True
+            , backendSupportsCExport = True
 
             ----------------- supporting tooling
             -- | The assembler used on the code that is written by this back end.
@@ -266,6 +272,7 @@ noBackend =
 interpreterBackend = -- implements -fno-code
     prototypeBackend { backendDescription = "byte-code interpreter"
                      , backendWritesFiles = False
+                     , backendCanReuseLoadedCode = True
                      , backendPipelineOutput = NoOutputFile
                      , backendRespectsSpecialise = False
                      , backendWantsGlobalBindings = True
@@ -276,11 +283,37 @@ interpreterBackend = -- implements -fno-code
                      , backendSpecialModuleSource =
                          \recomp -> if recomp then Just "interpreted" else Nothing
                      , backendSupportsHpc = False
-                     , backendValidityOfCExport =
-                         NotValid (text $ "requires unregisterised, llvm (-fllvm) or " ++
-                                          "native code generation (-fasm)")
-
+                     , backendSupportsCExport = False
                      , backendCodeOutput = panic "codeOutput: interpreterBackend"
                      , backendNormalSuccessorPhase = StopLn
                      }
 
+
+
+-- | A list of all back ends.  They are ordered as we wish them to
+-- appear when they are enumerated in error messages.
+
+allBackends :: [Backend]
+allBackends = [ ncgBackend
+              , llvmBackend
+              , viaCBackend
+              , interpreterBackend
+              , noBackend
+              ]
+
+-- | When foreign C import or export is invalid, the carried value
+-- enumerates the /valid/ back ends.
+
+backendValidityOfCImport, backendValidityOfCExport :: Backend -> Validity' [Backend]
+
+backendValidityOfCImport backend =
+    if backendSupportsCImport backend then
+        IsValid
+    else
+        NotValid $ filter backendSupportsCImport allBackends
+
+backendValidityOfCExport backend =
+    if backendSupportsCExport backend then
+        IsValid
+    else
+        NotValid $ filter backendSupportsCExport allBackends

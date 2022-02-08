@@ -56,8 +56,8 @@
 --     functions, cannot be placed in the `Backend` record itself.
 --     Instead, the /names/ of those functions are placed.  Each name is
 --     a value constructor in one of the algebraic data types defined in
---     this module.  The named function must then be defined in
---     "GHC.Driver.Backend.Refunctionalize" or in "GHC.Driver.Pipeline".
+--     this module.  The named function is then defined near its point
+--     of use.
 --
 --   * When a new back end is defined, it's quite possible that the
 --     compiler driver will have to be changed in some way.  Just because
@@ -248,6 +248,13 @@ data Backend =
             -- temporary, persistent, or specific.
             , backendPipelineOutput :: PipelineOutput
 
+
+            -- | This flag tells the driver whether the back end can
+            -- reuse code (bytecode or object code) that has been
+            -- loaded dynamically.  Likely true only of the interpreter.
+            , backendCanReuseLoadedCode :: Bool
+
+
             -- | It is is true of every back end except @-fno-code@
             -- that it "generates code."  Surprisingly, this property
             -- influences the driver in a ton of ways.  Some examples:
@@ -267,7 +274,7 @@ data Backend =
             --
             , backendGeneratesCode :: !Bool
 
-            -- ^ When set, this flag turns on interface writing for
+            -- | When set, this flag turns on interface writing for
             -- Backpack.  It should probably be the same as
             -- `backendGeneratesCode`, but it is kept distinct for
             -- reasons described in Note [-fno-code mode].
@@ -398,15 +405,15 @@ data Backend =
 
 
 
-            -- | This flag says whehther the back end supports foreign
+            -- | This flag says whether the back end supports foreign
             -- import of C functions.  ("Supports" means "does not
             -- barf on," so @-fno-code@ supports foreign C imports.)
-            , backendValidityOfCImport :: !Validity
+            , backendSupportsCImport :: !Bool
 
 
             -- | This flag says whehther the back end supports foreign
             -- export of Haskell functions to C.
-            , backendValidityOfCExport :: !Validity
+            , backendSupportsCExport :: !Bool
 
 
 
@@ -418,19 +425,26 @@ data Backend =
             -- `DynFlags`, and `Platform` is run with the given
             -- `Option`s.
             --
+            -- The function's type is
+            -- @
+            -- Logger -> DynFlags -> Platform -> [Option] -> IO ()
+            -- @
+            --
             -- This field is usually defaulted.
             , backendAssemblerProg :: DefunctionalizedAssemblerProg
-              -- ^ Logger -> DynFlags -> Platform -> [Option] -> IO ()
 
             -- | This (defunctionalized) function is used to retrieve
             -- an enumeration value that characterizes the C/assembler
             -- part of a toolchain.  The function caches the info in a
             -- mutable variable that is part of the `DynFlags`.
             --
+            -- The function's type is
+            -- @
+            -- Logger -> DynFlags -> Platform -> IO CompilerInfo
+            -- @
+            --
             -- This field is usually defaulted.
             , backendAssemblerInfoGetter :: DefunctionalizedAssemblerInfoGetter
-                 -- ^ Logger -> DynFlags -> Platform -> IO CompilerInfo
-
 
             -- | When using this back end, it may be necessary or
             -- advisable to pass some `-D` options to a C compiler.
@@ -439,9 +453,13 @@ data Backend =
             -- order to interrogate external tools about what version
             -- they are, for example.
             --
+            -- The function's type is
+            -- @
+            -- Logger -> DynFlags -> IO [String]
+            -- @
+            --
             -- This field is usually defaulted.
             , backendCDefs :: DefunctionalizedCDefs
-               -- ^ Logger -> DynFlags -> IO [String]
 
 
             ----------------- code generation and compiler driver
@@ -491,58 +509,56 @@ instance Show Backend where
   show = backendDescription
 
 
-----------------------------------------------------------------
---
--- Note [Backend Defunctionalization]
---
--- I had hoped to include code-output and post-hsc-pipeline functions
--- directly in the `Backend` record itself.  But this agenda was derailed
--- by mutual recursion in the types:
---
---   - A `DynFlags` record contains a back end of type `Backend`.
---   - A `Backend` contains a code-output function.
---   - A code-output function takes Cmm as input.
---   - Cmm can include a `CLabel`.
---   - A `CLabel` can have elements that are defined in
---     `GHC.Driver.Session`, where `DynFlags` is defined.
---
--- There is also a nasty issue in the values: a typical post-backend
--- pipeline function both depends on and is depended upon by functions in
--- "GHC.Driver.Pipeline".
---
--- I'm cut the Gordian not by removing the function types from the
--- `Backend` record.  Instead, a function is represented by its /name/.
--- This representation is an example of an old trick called
--- /defunctionalization/, which has been used in both compilers and
--- interpreters for languages with first-class, nested functions.  Here,
--- a function's name is a value of an algebraic data type.  For example,
--- a code-output function is represented by a value of this type:
---
---     data DefunctionalizedCodeOutput
---       = NcgCodeOutput
---       | ViaCCodeOutput
---       | LlvmCodeOutput
---
--- To apply the named function, one uses module
--- "Driver.Backend.Refunctionalize", which exports this function:
---
---     applyCodeOutput
---         :: DefunctionalizedCodeOutput
---         -> Logger
---         -> DynFlags
---         -> Module
---         -> ModLocation
---         -> FilePath
---         -> Set UnitId
---         -> Stream IO RawCmmGroup a
---         -> IO a
---
--- I don't love this solution, but defunctionalization is a standard
--- thing, and it makes the meanings of the enumeration values clear.
---
--- Anyone defining a new back end will need to extend both the
--- `DefunctionalizedCodeOutput` type and the corresponding apply
--- function.
---
-----------------------------------------------------------------
+{-
+Note [Backend Defunctionalization]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+I had hoped to include code-output and post-hsc-pipeline functions
+directly in the `Backend` record itself.  But this agenda was derailed
+by mutual recursion in the types:
 
+  - A `DynFlags` record contains a back end of type `Backend`.
+  - A `Backend` contains a code-output function.
+  - A code-output function takes Cmm as input.
+  - Cmm can include a `CLabel`.
+  - A `CLabel` can have elements that are defined in
+    `GHC.Driver.Session`, where `DynFlags` is defined.
+
+There is also a nasty issue in the values: a typical post-backend
+pipeline function both depends on and is depended upon by functions in
+"GHC.Driver.Pipeline".
+
+I'm cut the Gordian not by removing the function types from the
+`Backend` record.  Instead, a function is represented by its /name/.
+This representation is an example of an old trick called
+/defunctionalization/, which has been used in both compilers and
+interpreters for languages with first-class, nested functions.  Here,
+a function's name is a value of an algebraic data type.  For example,
+a code-output function is represented by a value of this type:
+
+    data DefunctionalizedCodeOutput
+      = NcgCodeOutput
+      | ViaCCodeOutput
+      | LlvmCodeOutput
+
+Such a function may be applied in one of two ways:
+
+  - In this particular example, a `case` expression in module
+    "GHC.Driver.CodeOutput" discriminates on the value and calls the
+    designated function.
+
+  - In another example, a function of type `DefunctionalizedCDefs` is
+    applied by calling function `applyCDefs`, which has this type:
+
+    @
+    applyCDefs :: DefunctionalizedCDefs -> Logger -> DynFlags -> IO [String]
+    @
+
+    Function `applyCDefs` is defined in module "GHC.Driver.Pipeline.Execute".
+
+I don't love this solution, but defunctionalization is a standard
+thing, and it makes the meanings of the enumeration values clear.
+
+Anyone defining a new back end will need to extend both the
+`DefunctionalizedCodeOutput` type and the corresponding apply
+function.
+-}
