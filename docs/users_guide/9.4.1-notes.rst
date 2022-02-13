@@ -129,7 +129,13 @@ Compiler
   Note that the explicit type applications are required, as the call to
   ``withDict`` would be ambiguous otherwise.
 
-``ghc-prim`` library
+- ``GHC.IO.Exceptions.AsyncException.StackOverflow`` has been replaced with a
+  new constructor ``GHC.IO.Exceptions.AsyncException.StackOverflow'`` holding a
+  new ``Word#`` communicating the size of the stack when the overflow occurred.
+  A new pattern synonym ``GHC.IO.Exceptions.StackOverflow`` is bundled with
+  ``GHC.IO.Exceptions.AsyncException``, so no changes to programs are required.
+
+  ``ghc-prim`` library
 ~~~~~~~~~~~~~~~~~~~~
 
 - Primitive types and functions which handle boxed values are now levity-polymorphic,
