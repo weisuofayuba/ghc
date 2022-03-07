@@ -415,7 +415,7 @@ def tabulate_metrics(metrics: List[PerfMetric]) -> None:
     ]
     dataRows += [
         row(("", "", "", "", "", "", "", "")),
-        row(("geo. mean", "", "", "", "", "", "{:+4.1f}%".format(100*(geometry_mean(changes)-1)), "")),
+        row(("geo. mean", "", "", "", "", "", "{:+4.1f}%".format(100*(geometric_mean(changes)-1)), "")),
         row(("minimum  ", "", "", "", "", "", "{:+4.1f}%".format(100*(min(changes)-1)), "")),
         row(("maximum  ", "", "", "", "", "", "{:+4.1f}%".format(100*(max(changes)-1)), "")),
     ]
