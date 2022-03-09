@@ -39,8 +39,6 @@ import GHC.Data.ShortText (ShortText)
 -- Note [JS heap objects]
 -- ~~~~~~~~~~~~~~~~~~~~~~
 --
--- TODO: add more details from https://www.haskell.org/haskell-symposium/2013/ghcjs.pdf
---
 -- Objects on the heap ("closures") are represented as JavaScript objects with
 -- the following fields:
 --
@@ -50,12 +48,18 @@ import GHC.Data.ShortText (ShortText)
 --  , d2: y
 --  }
 --
--- The object returned when entering heap objects (closure.f) has the following
--- fields:
+-- Every heap object has an entry function "f".
 --
---  { t: closure type
---  , a: constructor tag / fun arity
---  }
+-- Similarly to info tables in native code generation, the JS function object
+-- "f" also contains some metadata about the Haskell object:
+--
+--    { t: closure type
+--    , a: constructor tag / fun arity
+--    }
+--
+-- Note that functions in JS are objects so if "f" is a function we can:
+--  - call it, e.g. "f(arg0,arg1...)"
+--  - get/set its metadata, e.g. "var closureType = f.t"
 --
 -- THUNK =
 --  { f  = returns the object reduced to WHNF
@@ -95,12 +99,9 @@ import GHC.Data.ShortText (ShortText)
 --  , d2 = waiters array
 --  }
 --
--- STACKFRAME =
---  { f  = ?
---  , m  = ?
---  , d1 = ?
---  , d2 = ?
---  }
+-- StackFrame closures are *not* represented as JS objects. Instead they are
+-- "unpacked" in the stack, i.e. a stack frame occupies a few slots in the JS
+-- array representing the stack ("h$stack").
 
 closureEntry_ :: ShortText
 closureEntry_ = "f"
