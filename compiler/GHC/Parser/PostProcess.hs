@@ -37,6 +37,7 @@ module GHC.Parser.PostProcess (
         setRdrNameSpace,
         fromSpecTyVarBndr, fromSpecTyVarBndrs,
         annBinds,
+        stmtsAnchor, stmtsLoc,
 
         cvBindGroup,
         cvBindsAndSigs,
@@ -470,6 +471,18 @@ patch_anchor :: RealSrcSpan -> Anchor -> Anchor
 patch_anchor r1 (Anchor r0 op) = Anchor r op
   where
     r = if srcSpanStartLine r0 < 0 then r1 else r0
+
+-- | The 'Anchor' for a stmtlist is based on either the location or
+-- the first semicolon annotion.
+stmtsAnchor :: Located (OrdList AddEpAnn,a) -> Anchor
+stmtsAnchor (L l ((ConsOL (AddEpAnn _ (EpaSpan r)) _), _))
+  = widenAnchorR (Anchor (realSrcSpan l) UnchangedAnchor) r
+stmtsAnchor (L l _) = Anchor (realSrcSpan l) UnchangedAnchor
+
+stmtsLoc :: Located (OrdList AddEpAnn,a) -> SrcSpan
+stmtsLoc (L l ((ConsOL aa _), _))
+  = widenSpan l [aa]
+stmtsLoc (L l _) = l
 
 {- **********************************************************************
 
