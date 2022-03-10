@@ -470,12 +470,16 @@ non-CAFFY.
 -- ---------------------------------------------------------------------
 -- Label types
 
--- Labels that come from cafAnal can be:
---   - _closure labels for static functions or CAFs
---   - _info labels for dynamic functions, thunks, or continuations
---   - _entry labels for functions or thunks
+-- |
+-- The label of a CAFfy thing.
 --
--- Meanwhile the labels on top-level blocks are _entry labels.
+-- Labels that come from cafAnal can be:
+--   - @_closure@ labels for static functions, static data constructor
+--     applications, or static thunks (CAFs)
+--   - @_info@ labels for dynamic functions, thunks, or continuations
+--   - @_entry@ labels for functions or thunks
+--
+-- Meanwhile the labels on top-level blocks are @_entry@ labels.
 --
 -- To put everything in the same namespace we convert all labels to
 -- closure labels using toClosureLbl.  Note that some of these
@@ -493,6 +497,7 @@ type CAFEnv = LabelMap CAFSet
 mkCAFLabel :: Platform -> CLabel -> CAFLabel
 mkCAFLabel platform lbl = CAFLabel (toClosureLbl platform lbl)
 
+-- |
 -- This is a label that we can put in an SRT.  It *must* be a closure label,
 -- pointing to either a FUN_STATIC, THUNK_STATIC, or CONSTR.
 newtype SRTEntry = SRTEntry CLabel
@@ -535,17 +540,17 @@ cafAnalData platform st = case st of
 -- |
 -- For each code block:
 --   - collect the references reachable from this code block to FUN,
---     THUNK or RET labels for which hasCAF == True
+--     THUNK or RET labels for which @hasCAF == True@
 --
--- This gives us a `CAFEnv`: a mapping from code block to sets of labels
+-- This gives us a 'CAFEnv': a mapping from code block to sets of labels
 --
 cafAnal
   :: Platform
-  -> LabelSet   -- The blocks representing continuations, ie. those
+  -> LabelSet   -- ^ The blocks representing continuations, ie. those
                 -- that will get RET info tables.  These labels will
                 -- get their own SRTs, so we don't aggregate CAFs from
                 -- references to these labels, we just use the label.
-  -> CLabel     -- The top label of the proc
+  -> CLabel     -- ^ The top label of the proc
   -> CmmGraph
   -> CAFEnv
 cafAnal platform contLbls topLbl cmmGraph =
@@ -698,7 +703,7 @@ getLabelledBlocks platform decl = case decl of
 -- | Put the labelled blocks that we will be annotating with SRTs into
 -- dependency order.  This is so that we can process them one at a
 -- time, resolving references to earlier blocks to point to their
--- SRTs. CAFs themselves are not included here; see getCAFs below.
+-- SRTs. CAFs themselves are not included here; see 'getCAFs' below.
 depAnalSRTs
   :: Platform
   -> CAFEnv
@@ -729,12 +734,18 @@ depAnalSRTs platform cafEnv cafEnv_static decls =
   graph :: [SCC (SomeLabel, CAFLabel, Set CAFLabel)]
   graph = stronglyConnCompFromEdgedVerticesOrd nodes
 
--- | Get (Label, CAFLabel, Set CAFLabel) for each block that represents a CAF.
--- These are treated differently from other labelled blocks:
+-- | Get @(Label, CAFLabel, Set CAFLabel)@ for each CAF block.
+-- The @Set CafLabel@ represents the set of CAFfy things which this CAF's code
+-- depends upon.
+--
+-- CAFs are treated differently from other labelled blocks:
+--
 --  - we never shortcut a reference to a CAF to the contents of its
 --    SRT, since the point of SRTs is to keep CAFs alive.
+--
 --  - CAFs therefore don't take part in the dependency analysis in depAnalSRTs.
 --    instead we generate their SRTs after everything else.
+--
 getCAFs :: Platform -> CAFEnv -> [CmmDecl] -> [(Label, CAFLabel, Set CAFLabel)]
 getCAFs platform cafEnv decls =
   [ (g_entry g, mkCAFLabel platform topLbl, cafs)
@@ -900,11 +911,11 @@ doSRTs cfg moduleSRTInfo procs data_ = do
   return (moduleSRTInfo'{ moduleSRTMap = srtMap_w_raws }, srt_decls ++ decls')
 
 
--- | Build the SRT for a strongly-connected component of blocks
+-- | Build the SRT for a strongly-connected component of blocks.
 doSCC
   :: CmmConfig
-  -> LabelMap CLabel -- which blocks are static function entry points
-  -> Set CLabel -- static data
+  -> LabelMap CLabel -- ^ which blocks are static function entry points
+  -> Set CLabel -- ^ static data
   -> SCC (SomeLabel, CAFLabel, Set CAFLabel)
   -> StateT ModuleSRTInfo UniqSM
         ( [CmmDeclSRTs]          -- generated SRTs
@@ -950,12 +961,12 @@ references to static function closures.
 -- | Build an SRT for a set of blocks
 oneSRT
   :: CmmConfig
-  -> LabelMap CLabel            -- which blocks are static function entry points
-  -> [SomeLabel]                -- blocks in this set
-  -> [CAFLabel]                 -- labels for those blocks
-  -> Bool                       -- True <=> this SRT is for a CAF
-  -> Set CAFLabel               -- SRT for this set
-  -> Set CLabel                 -- Static data labels in this group
+  -> LabelMap CLabel            -- ^ which blocks are static function entry points
+  -> [SomeLabel]                -- ^ blocks in this set
+  -> [CAFLabel]                 -- ^ labels for those blocks
+  -> Bool                       -- ^ True <=> this SRT is for a CAF
+  -> Set CAFLabel               -- ^ SRT for this set
+  -> Set CLabel                 -- ^ Static data labels in this group
   -> StateT ModuleSRTInfo UniqSM
        ( [CmmDeclSRTs]                -- SRT objects we built
        , [(Label, CLabel)]            -- SRT fields for these blocks' itbls
