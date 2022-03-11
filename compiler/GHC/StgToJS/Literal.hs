@@ -4,7 +4,6 @@
 module GHC.StgToJS.Literal
   ( genLit
   , genStaticLit
-  , genSingleLit
   )
 where
 
@@ -30,6 +29,12 @@ import qualified Data.ByteString.Short as Short
 import Data.Bits as Bits
 import Data.Char (ord)
 
+-- | Generate JS expressions for a Literal
+--
+-- Literals represented with 2 values:
+--  * Addr# (Null and Strings): array and offset
+--  * 64-bit values: high 32-bit, low 32-bit
+--  * labels: call to h$mkFunctionPtr and 0, or function name and 0
 genLit :: HasDebugCallStack => Literal -> G [JExpr]
 genLit = \case
   LitChar c     -> return [ toJExpr (ord c) ]
@@ -86,19 +91,6 @@ genStaticLit = \case
 toSigned :: Integer -> Integer
 toSigned i | Bits.testBit i 31 = Bits.complement (0x7FFFFFFF `Bits.xor` (i Bits..&. 0x7FFFFFFF))
            | otherwise         = i Bits..&. 0xFFFFFFFF
-
--- truncate literal to fit in 32 bit int
-{-
-intLit :: Integer -> Integer
-intLit i = fromIntegral (fromIntegral i :: Int32)
--}
-
-genSingleLit :: Literal -> G JExpr
-genSingleLit l = do
-  es <- genLit l
-  case es of
-    [e] -> return e
-    _   -> panic "genSingleLit: expected single-variable literal"
 
 r2d :: Rational -> Double
 r2d = realToFrac

@@ -72,9 +72,9 @@ genExpr :: HasDebugCallStack => ExprCtx -> CgStgExpr -> G (JStat, ExprResult)
 genExpr ctx stg = case stg of
   StgApp f args -> genApp ctx f args
   StgLit l      -> do
-    r <- assignAllCh ("genExpr StgLit " ++ show (ctxTarget ctx))
-                                           (concatMap snd $ ctxTarget ctx)
-                           <$> genLit l
+    ls <- genLit l
+    let vs = concatMap snd $ ctxTarget ctx
+    let r = mconcat (zipWithEqual "genExpr StgLit" (|=) vs ls)
     -- fixme check primRep here?
     pure (r,ExprInline Nothing)
   StgConApp con _n args _ -> do
@@ -276,16 +276,6 @@ genEntryType args0 = do
   return $ CIFun (length args) (length $ concat args')
   where
     args = filter (not . isRuntimeRepKindedTy . idType) args0
-
--- assign ys to xs, checking if the lengths are compatible
-assignAllCh :: String -> [JExpr] -> [JExpr] -> JStat
-assignAllCh msg xs ys
-  | length xs == length ys = mconcat (zipWith (|=) xs ys)
-  | otherwise =
-     panic $ "assignAllCh: lengths do not match: " ++
-             show (length xs, length ys) ++
-             "\n    " ++
-             msg
 
 genBody :: HasDebugCallStack
          => ExprCtx
@@ -817,9 +807,11 @@ ifCond = \case
 
 caseCond :: AltCon -> G (Maybe JExpr)
 caseCond = \case
-  DataAlt da -> return $ Just (toJExpr $ dataConTag da)
-  LitAlt l   -> Just <$> genSingleLit l
   DEFAULT    -> return Nothing
+  DataAlt da -> return $ Just (toJExpr $ dataConTag da)
+  LitAlt l   -> genLit l >>= \case
+    [e] -> pure (Just e)
+    es  -> pprPanic "caseCond: expected single-variable literal" (ppr es)
 
 -- load parameters from constructor
 -- fixme use single tmp var for all branches
