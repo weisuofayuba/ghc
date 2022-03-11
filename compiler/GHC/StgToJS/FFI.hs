@@ -52,7 +52,7 @@ import qualified Text.ParserCombinators.ReadP as P
 -- FIXME: what if the call returns a thunk?
 genPrimCall :: ExprCtx -> PrimCall -> [StgArg] -> Type -> G (JStat, ExprResult)
 genPrimCall ctx (PrimCall lbl _) args t = do
-  j <- parseFFIPattern False False False ("h$" ++ unpackFS lbl) t (map toJExpr . concatMap snd $ ctxTarget ctx) args
+  j <- parseFFIPattern False False False ("h$" ++ unpackFS lbl) t (concatMap typex_expr $ ctxTarget ctx) args
   return (j, ExprInline Nothing)
 
 -- | generate the actual call
@@ -123,7 +123,7 @@ parseFFIPatternA True True pat t es as  = do
             ])
     ]
     where nrst = typeSize t
-          copyResult d = assignAll es (map (IdxExpr d . toJExpr) [0..nrst-1])
+          copyResult d = assignAllEqual es (map (IdxExpr d . toJExpr) [0..nrst-1])
 parseFFIPatternA _async javascriptCc pat t es as =
   parseFFIPattern' Nothing javascriptCc pat t es as
 

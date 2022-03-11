@@ -43,7 +43,8 @@ module GHC.JS.Make
   , allocData, allocClsA
   , typeof
   , dataFieldName, dataFieldNames
-  , returnStack, assignAll
+  , returnStack, assignAllEqual, assignAll
+  , declAssignAll
   , nullStat, (.^)
   )
 where
@@ -380,9 +381,14 @@ infixl 2 ||=, |=
 
 infixl 8 .!
 
-assignAll :: HasDebugCallStack => [JExpr] -> [JExpr] -> JStat
-assignAll xs ys = mconcat (zipWithEqual "assignAll" (|=) xs ys)
+assignAllEqual :: HasDebugCallStack => [JExpr] -> [JExpr] -> JStat
+assignAllEqual xs ys = mconcat (zipWithEqual "assignAllEqual" (|=) xs ys)
 
+assignAll :: [JExpr] -> [JExpr] -> JStat
+assignAll xs ys = mconcat (zipWith (|=) xs ys)
+
+declAssignAll :: [Ident] -> [JExpr] -> JStat
+declAssignAll xs ys = mconcat (zipWith (||=) xs ys)
 
 -- | Cache "dXXX" field names
 --

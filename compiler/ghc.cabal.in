@@ -614,6 +614,7 @@ Library
         GHC.StgToJS.StgUtils
         GHC.StgToJS.Types
         GHC.StgToJS.UnitUtils
+        GHC.StgToJS.Utils
         GHC.Stg.Unarise
         GHC.SysTools
         GHC.SysTools.Ar

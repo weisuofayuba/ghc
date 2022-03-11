@@ -1,8 +1,11 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Core utils
 module GHC.StgToJS.CoreUtils where
 
 import GHC.Prelude
 
+import GHC.JS.Syntax
 import GHC.StgToJS.Types
 
 import GHC.Stg.Syntax
@@ -42,11 +45,29 @@ isUnboxable DoubleV = True
 isUnboxable IntV    = True -- includes Char#
 isUnboxable _       = False
 
+data SlotCount
+  = NoSlot
+  | OneSlot
+  | TwoSlots
+  deriving (Show,Eq,Ord)
+
+instance Outputable SlotCount where
+  ppr = text . show
+
 varSize :: VarType -> Int
-varSize VoidV = 0
-varSize LongV = 2 -- hi, low
-varSize AddrV = 2 -- obj/array, offset
-varSize _     = 1
+varSize = slotCount . varSlotCount
+
+slotCount :: SlotCount -> Int
+slotCount = \case
+  NoSlot   -> 0
+  OneSlot  -> 1
+  TwoSlots -> 2
+
+varSlotCount :: VarType -> SlotCount
+varSlotCount VoidV = NoSlot
+varSlotCount LongV = TwoSlots -- hi, low
+varSlotCount AddrV = TwoSlots -- obj/array, offset
+varSlotCount _     = OneSlot
 
 typeSize :: Type -> Int
 typeSize t = sum . map varSize . typeVt $ t
@@ -60,10 +81,13 @@ isPtr PtrV = True
 isPtr _    = False
 
 isSingleVar :: VarType -> Bool
-isSingleVar v = varSize v == 1
+isSingleVar v = varSlotCount v == OneSlot
 
 isMultiVar :: VarType -> Bool
-isMultiVar v = varSize v > 1
+isMultiVar v = case varSlotCount v of
+  NoSlot   -> False
+  OneSlot  -> False
+  TwoSlots -> True
 
 -- | can we pattern match on these values in a case?
 isMatchable :: [VarType] -> Bool
@@ -197,20 +221,30 @@ fixedLayout vts = CILayoutFixed (sum (map varSize vts)) vts
 -- ObjV is 1 var, so this is no problem for implicit metadata
 stackSlotType :: Id -> VarType
 stackSlotType i
-  | varSize otype == 1 = otype
-  | otherwise          = DoubleV
+  | OneSlot <- varSlotCount otype = otype
+  | otherwise                     = DoubleV
   where otype = uTypeVt (idType i)
 
-idTarget :: Id -> [(PrimRep, Int)]
-idTarget = typeTarget . idType
+idPrimReps :: Id -> [PrimRep]
+idPrimReps = typePrimReps . idType
 
-typeTarget :: Type -> [(PrimRep, Int)]
-typeTarget = map (\t -> (t, varSize (primRepVt t))) . typePrimRep . unwrapType
+typePrimReps :: Type -> [PrimRep]
+typePrimReps = typePrimRep . unwrapType
 
-alignTarget :: [(PrimRep, Int)] -> [a] -> [(PrimRep, [a])]
-alignTarget []     _  = []
-alignTarget ((rep, size):xs) vs
-  | length vs0 == size = (rep, vs0) : alignTarget xs vs1
-  | otherwise          = panic "alignTarget: target size insufficient"
-  where (vs0, vs1) = splitAt size vs
+primRepSize :: PrimRep -> SlotCount
+primRepSize p = varSlotCount (primRepVt p)
 
+-- | Assign values to each prim rep slot
+alignPrimReps :: Outputable a => [PrimRep] -> [a] -> [(PrimRep, [a])]
+alignPrimReps []     _  = []
+alignPrimReps (r:rs) vs = case (primRepSize r,vs) of
+  (NoSlot,   xs)     -> (r,[])    : alignPrimReps rs xs
+  (OneSlot,  x:xs)   -> (r,[x])   : alignPrimReps rs xs
+  (TwoSlots, x:y:xs) -> (r,[x,y]) : alignPrimReps rs xs
+  err                -> pprPanic "alignPrimReps" (ppr err)
+
+alignIdPrimReps :: Outputable a => Id -> [a] -> [(PrimRep, [a])]
+alignIdPrimReps i = alignPrimReps (idPrimReps i)
+
+alignIdExprs :: Id -> [JExpr] -> [TypedExpr]
+alignIdExprs i es = fmap (uncurry TypedExpr) (alignIdPrimReps i es)

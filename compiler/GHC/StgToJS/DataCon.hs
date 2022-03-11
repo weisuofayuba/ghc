@@ -19,6 +19,7 @@ import GHC.StgToJS.Types
 import GHC.StgToJS.Monad
 import GHC.StgToJS.CoreUtils
 import GHC.StgToJS.Profiling
+import GHC.StgToJS.Utils
 
 import GHC.Core.DataCon
 
@@ -33,18 +34,17 @@ import Data.Maybe
 
 genCon :: ExprCtx -> DataCon -> [JExpr] -> G JStat
 genCon ctx con args
-  -- fixme should we check the primreps here?
   | isUnboxedTupleDataCon con
-  , length (concatMap snd $ ctxTarget ctx) == length args
-  = return $ assignAll (concatMap snd $ ctxTarget ctx) args
-genCon ctx con args | isUnboxedTupleDataCon con =
-  pprPanic "genCon: unhandled DataCon:"
-           (vcat [ppr con, ppr (ctxTop ctx), ppr (ctxTarget ctx), ppr args])
-genCon ctx con args | [ValExpr (JVar ctxi)] <- concatMap snd (ctxTarget ctx) =
-  allocCon ctxi con currentCCS args
-genCon _ctx _con _args =
-  return mempty -- fixme, do we get missing VecRep things because of this?
-  -- panic ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (ctxTop ctx, length args))
+  = return $ assignToExprCtx ctx args
+
+  | [ValExpr (JVar ctxi)] <- concatMap typex_expr (ctxTarget ctx)
+  = allocCon ctxi con currentCCS args
+
+  -- FIXME: (Sylvain 2022-03-11) Do we support e.g. "data T = MkT Word64"? It
+  -- would return two JExprs
+
+  | otherwise
+  = pprPanic "genCon: unhandled DataCon" (ppr con)
 
 allocCon :: Ident -> DataCon -> CostCentreStack -> [JExpr] -> G JStat
 allocCon to con cc xs

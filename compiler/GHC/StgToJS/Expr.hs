@@ -31,6 +31,7 @@ import GHC.StgToJS.Profiling
 import GHC.StgToJS.Regs
 import GHC.StgToJS.StgUtils
 import GHC.StgToJS.CoreUtils
+import GHC.StgToJS.Utils
 
 import GHC.Types.CostCentre
 import GHC.Types.Tickish
@@ -73,16 +74,14 @@ genExpr ctx stg = case stg of
   StgApp f args -> genApp ctx f args
   StgLit l      -> do
     ls <- genLit l
-    let vs = concatMap snd $ ctxTarget ctx
-    let r = assignAll vs ls
-    -- fixme check primRep here?
+    let r = assignToExprCtx ctx ls
     pure (r,ExprInline Nothing)
   StgConApp con _n args _ -> do
     as <- concatMapM genArg args
     c <- genCon ctx con as
     return (c, ExprInline (Just as))
   StgOpApp (StgFCallOp f _) args t
-    -> genForeignCall ctx f t (concatMap snd $ ctxTarget ctx) args
+    -> genForeignCall ctx f t (concatMap typex_expr $ ctxTarget ctx) args
   StgOpApp (StgPrimOp op) args t
     -> genPrimOp ctx op args t
   StgOpApp (StgPrimCallOp c) args t
@@ -151,7 +150,7 @@ genBind ctx bndr =
        | snd (isInlineExpr (ctxEval ctx) expr) = do
            d   <- declIds b
            tgt <- genIds b
-           let ctx' = ctx { ctxTarget = alignTarget (idTarget b) tgt }
+           let ctx' = ctx { ctxTarget = alignIdExprs b tgt }
            (j, _) <- genExpr ctx' expr
            return (Just (d <> j))
      assign _b StgRhsCon{} = return Nothing
@@ -287,12 +286,12 @@ genBody :: HasDebugCallStack
 genBody ctx i startReg args e = do
   la <- loadArgs startReg args
   lav <- verifyRuntimeReps args
-  let ids :: [(PrimRep, [JExpr])]
+  let ids :: [TypedExpr]
       ids = -- take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
             reverse . fst $
             foldl' (\(rs, vs) (rep, size) ->
                        let (vs0, vs1) = splitAt size vs
-                       in  ((rep, vs0):rs,vs1))
+                       in  (TypedExpr rep vs0:rs,vs1))
                    ([], map toJExpr $ enumFrom R1)
                    (resultSize args $ idType i)
   (e, _r) <- genExpr (ctx { ctxTarget = ids }) e
@@ -314,14 +313,14 @@ resultSize [] t
   | isRuntimeRepKindedTy t' = []
   | isRuntimeRepTy t' = []
   | Nothing <- isLiftedType_maybe t' = [(LiftedRep, 1)]
-  | otherwise = typeTarget t
+  | otherwise = fmap (\p -> (p, slotCount (primRepSize p))) (typePrimReps t)
   where
     t' = unwrapType t
 
 loadArgs :: HasDebugCallStack => StgReg -> [Id] -> G JStat
 loadArgs start args = do
   args' <- concatMapM genIdArgI args
-  return (mconcat $ zipWith (\a r -> a ||= toJExpr r) args' [start..])
+  return (declAssignAll args' (fmap toJExpr [start..]))
 
 verifyRuntimeReps :: HasDebugCallStack => [Id] -> G JStat
 verifyRuntimeReps xs = do
@@ -498,7 +497,7 @@ genCase ctx bnd e at alts l
       bndi <- genIdsI bnd
       let ctx' = ctx
                   { ctxTop    = bnd
-                  , ctxTarget = alignTarget (idTarget bnd) (map toJExpr bndi)
+                  , ctxTarget = alignIdExprs bnd (map toJExpr bndi)
                   }
       (ej, r) <- genExpr ctx' e
       let d = case r of
@@ -525,7 +524,7 @@ genCase ctx bnd e at alts l
       rj       <- genRet (addEval bnd ctx) bnd at alts l
       let ctx' = ctx
                   { ctxTop    = bnd
-                  , ctxTarget = alignTarget (idTarget bnd) (map toJExpr [R1 ..])
+                  , ctxTarget = alignIdExprs bnd (map toJExpr [R1 ..])
                   }
       (ej, _r) <- genExpr ctx' e
       return (rj <> ej, ExprCont)
@@ -611,7 +610,7 @@ genAlts ctx e at me alts = do
         dids     <- mconcat <$> mapM declIds bs
         bss      <- concatMapM genIds bs
         (ej, er) <- genExpr ctx expr
-        return (dids <> assignAll bss ie <> ej, er)
+        return (dids <> assignAllEqual bss ie <> ej, er)
 
     PrimAlt tc
       -> do
@@ -640,9 +639,8 @@ genAlts ctx e at me alts = do
       , not (isUnboxableCon dc)
       -> do
         bsi <- mapM genIdsI bs
-        let args = zipWith (||=) (concat bsi) es
         (ej, er) <- genExpr ctx expr
-        return (mconcat args <> ej, er)
+        return (declAssignAll (concat bsi) es <> ej, er)
 
     AlgAlt _tc
       | [alt] <- alts
@@ -714,7 +712,7 @@ normalizeBranches ctx brs
   where
     mkCont b = case branch_result b of
       ExprInline{} -> b { branch_stat   = branch_stat b <> assignAll (map toJExpr $ enumFrom R1)
-                                                                     (concatMap snd $ ctxTarget ctx)
+                                                                     (concatMap typex_expr $ ctxTarget ctx)
                         , branch_result = ExprCont
                         }
       _ -> b
@@ -722,7 +720,7 @@ normalizeBranches ctx brs
 loadUbxTup :: [JExpr] -> [Id] -> Int -> G JStat
 loadUbxTup es bs _n = do
   bs' <- concatMapM genIdsI bs
-  return $ mconcat $ zipWith (||=) bs' es
+  return $ declAssignAll bs' es
 
 mkSw :: [JExpr] -> [Branch (Maybe [JExpr])] -> JStat
 mkSw [e] cases = mkSwitch e (fmap (fmap (fmap head)) cases)
@@ -944,6 +942,6 @@ genPrimOp ctx op args t = do
   as <- concatMapM genArg args
   prof <- csProf <$> getSettings
   -- fixme: should we preserve/check the primreps?
-  return $ case genPrim prof t op (map toJExpr . concatMap snd $ ctxTarget ctx) as of
+  return $ case genPrim prof t op (concatMap typex_expr $ ctxTarget ctx) as of
              PrimInline s -> (s, ExprInline Nothing)
              PRPrimCall s -> (s, ExprCont)

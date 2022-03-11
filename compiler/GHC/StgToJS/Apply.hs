@@ -21,6 +21,7 @@ import GHC.StgToJS.Types
 import GHC.StgToJS.Profiling
 import GHC.StgToJS.Regs
 import GHC.StgToJS.CoreUtils
+import GHC.StgToJS.Utils
 
 import GHC.Types.Literal
 import GHC.Types.Id
@@ -69,7 +70,7 @@ genApp ctx i args
 --     (,ExprInline Nothing) . (|=) top . app "h$decodeUtf8z" <$> genIds v
 
     | [StgLitArg (LitString bs), x] <- args
-    , [top] <- concatMap snd (ctxTarget ctx)
+    , [top] <- concatMap typex_expr (ctxTarget ctx)
     , getUnique i == unpackCStringAppendIdKey
     -- , Just d <- decodeModifiedUTF8 bs
     , d <- utf8DecodeByteString bs
@@ -96,8 +97,7 @@ genApp ctx i args
     | [] <- args
     , isUnboxedTupleType (idType i) || isStrictType (idType i)
     = do
-      a <- assignAllCh1 "genApp" (ctxTarget ctx) .
-                                (alignTarget (idTarget i)) <$> genIds i
+      a <- assignCoerce1 (ctxTarget ctx) . (alignIdExprs i) <$> genIds i
       return (a, ExprInline Nothing)
 
     | [] <- args
@@ -105,7 +105,7 @@ genApp ctx i args
     , isUnboxable vt
     , i `elementOfUniqSet` (ctxEval ctx)
     = do
-      let c = head (concatMap snd $ ctxTarget ctx)
+      let c = head (concatMap typex_expr $ ctxTarget ctx)
       is <- genIds i
       case is of
         [i'] ->
@@ -117,12 +117,9 @@ genApp ctx i args
     | [] <- args
     , i `elementOfUniqSet` (ctxEval ctx) || isStrictId i
     = do
-      a <- assignAllCh1 "genApp"
-                       (ctxTarget ctx) .
-                       (alignTarget (idTarget i))
-                       <$> genIds i
+      a <- assignCoerce1 (ctxTarget ctx) . (alignIdExprs i) <$> genIds i
       settings <- getSettings
-      let ww = case concatMap snd (ctxTarget ctx) of
+      let ww = case concatMap typex_expr (ctxTarget ctx) of
                  [t] | csAssertRts settings ->
                          ifS (isObject t .&&. isThunk t)
                              (appS "throw" [String "unexpected thunk"]) -- yuck
@@ -136,7 +133,7 @@ genApp ctx i args
       as <- concatMapM genArg args
       case as of
         [ai] -> do
-          let t = head (concatMap snd (ctxTarget ctx))
+          let t = head (concatMap typex_expr (ctxTarget ctx))
               a' = case args of
                 [StgVarArg a'] -> a'
                 _              -> panic "genApp: unexpected arg"
@@ -322,32 +319,3 @@ might_be_a_function ty
   = False
   | otherwise
   = True
-
--- fixme what does this do?
-assignAllCh1 :: String
-             -> [(PrimRep, [JExpr])]
-             -> [(PrimRep, [JExpr])]
-             -> JStat
-assignAllCh1 _msg ((rx,ex):_xs) ((ry,ey):_ys) =
-  assignPrimReps rx ry ex ey
-assignAllCh1 _   [] [] = mempty
-assignAllCh1 _   _  _  =
-  panic $ "assignAllCh1: lengths do not match"
-
--- assign p2 to p1
-assignPrimReps :: PrimRep -> PrimRep -> [JExpr] -> [JExpr] -> JStat
-assignPrimReps _p1 _p2 e1 e2
--- Allow same size assignment, even if rep is not the same
---  | p1 /= p2 && Debug.Trace.trace ("implicit conversion: " ++ show p2 ++ " -> " ++ show p1) False = undefined
-  | length e1 == length e2 = mconcat (zipWith (|=) e1 e2)
--- Coercion between StablePtr# and Addr#
-assignPrimReps AddrRep UnliftedRep [a_val, a_off] [sptr] = mconcat
-    [ a_val |= var "h$stablePtrBuf"
-    , a_off |= sptr
-    ]
-assignPrimReps UnliftedRep AddrRep [sptr] [_a_val, a_off] =
-  sptr |= a_off
-assignPrimReps p1 p2 e1 e2 =
-  let sr r s = show r ++ " (size " ++ show (length s) ++ ")"
-  in  panic $ "cannot assign " ++ sr p2 e2 ++ " to " ++ sr p1 e1
-

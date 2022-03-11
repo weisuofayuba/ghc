@@ -221,9 +221,15 @@ data LinkableUnit = LinkableUnit
   , luForeignRefs  :: [ForeignJSRef]
   }
 
+-- | Typed expression
+data TypedExpr = TypedExpr
+  { typex_typ  :: !PrimRep
+  , typex_expr :: [JExpr]
+  }
+
 data ExprCtx = ExprCtx
   { ctxTop        :: Id
-  , ctxTarget     :: [(PrimRep,[JExpr])]
+  , ctxTarget     :: [TypedExpr]
   , ctxEval       :: UniqSet Id
   , ctxLne        :: UniqSet Id     -- ^ all lne-bound things
   , ctxLneFrameBs :: UniqFM Id Int  -- ^ binds in current lne frame (defined at size)
