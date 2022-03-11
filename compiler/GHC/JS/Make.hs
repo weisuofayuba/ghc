@@ -63,6 +63,7 @@ import qualified GHC.Data.ShortText as ST
 import GHC.Data.ShortText (ShortText)
 import GHC.Utils.Monad.State.Strict
 import GHC.Utils.Panic
+import GHC.Utils.Misc
 
 {--------------------------------------------------------------------
   ToJExpr Class
@@ -379,8 +380,8 @@ infixl 2 ||=, |=
 
 infixl 8 .!
 
-assignAll :: [JExpr] -> [JExpr] -> JStat
-assignAll xs ys = mconcat (zipWith (|=) xs ys)
+assignAll :: HasDebugCallStack => [JExpr] -> [JExpr] -> JStat
+assignAll xs ys = mconcat (zipWithEqual "assignAll" (|=) xs ys)
 
 
 -- | Cache "dXXX" field names

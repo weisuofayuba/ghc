@@ -74,7 +74,7 @@ genExpr ctx stg = case stg of
   StgLit l      -> do
     ls <- genLit l
     let vs = concatMap snd $ ctxTarget ctx
-    let r = mconcat (zipWithEqual "genExpr StgLit" (|=) vs ls)
+    let r = assignAll vs ls
     -- fixme check primRep here?
     pure (r,ExprInline Nothing)
   StgConApp con _n args _ -> do
