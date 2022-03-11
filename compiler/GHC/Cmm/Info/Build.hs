@@ -798,6 +798,11 @@ resolveCAF platform srtMap lbl@(CAFLabel l) =
   where
     ret = Map.findWithDefault (Just (SRTEntry (toClosureLbl platform l))) lbl srtMap
 
+anyCafRefs :: [CafInfo] -> CafInfo
+anyCafRefs caf_infos = case any mayHaveCafRefs caf_infos of
+                         True -> MayHaveCafRefs
+                         False -> NoCafRefs
+
 -- | Attach SRTs to all info tables in the CmmDecls, and add SRT
 -- declarations to the ModuleSRTInfo.
 --
@@ -863,7 +868,7 @@ doSRTs cfg moduleSRTInfo procs data_ = do
         [ ( [CmmDeclSRTs]          -- generated SRTs
           , [(Label, CLabel)]      -- SRT fields for info tables
           , [(Label, [SRTEntry])]  -- SRTs to attach to static functions
-          , Bool                   -- Whether the group has CAF references
+          , CafInfo                -- Whether the group has CAF references
           ) ]
 
       (result, moduleSRTInfo') =
@@ -882,7 +887,7 @@ doSRTs cfg moduleSRTInfo procs data_ = do
   let
     srtFieldMap = mapFromList (concat pairs)
     funSRTMap = mapFromList (concat funSRTs)
-    has_caf_refs' = or has_caf_refs
+    has_caf_refs' = anyCafRefs has_caf_refs
     decls' =
       concatMap (updInfoSRTs profile srtFieldMap funSRTMap has_caf_refs') decls
 
@@ -921,7 +926,7 @@ doSCC
         ( [CmmDeclSRTs]          -- generated SRTs
         , [(Label, CLabel)]      -- SRT fields for info tables
         , [(Label, [SRTEntry])]  -- SRTs to attach to static functions
-        , Bool                   -- Whether the group has CAF references
+        , CafInfo                -- Whether the group has CAF references
         )
 
 doSCC cfg staticFuns static_data (AcyclicSCC (l, cafLbl, cafs)) =
@@ -971,7 +976,7 @@ oneSRT
        ( [CmmDeclSRTs]                -- SRT objects we built
        , [(Label, CLabel)]            -- SRT fields for these blocks' itbls
        , [(Label, [SRTEntry])]        -- SRTs to attach to static functions
-       , Bool                         -- Whether the group has CAF references
+       , CafInfo                      -- Whether the group has CAF references
        )
 
 oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
@@ -1057,7 +1062,7 @@ oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
   if Set.null filtered0 then do
     srtTraceM "oneSRT: empty" (pdoc platform caf_lbls)
     updateSRTMap Nothing
-    return ([], [], [], False)
+    return ([], [], [], NoCafRefs)
   else do
     -- We're going to build an SRT for this group, which should include function
     -- references in the group. See Note [recursive SRTs].
@@ -1091,7 +1096,7 @@ oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
           -- recursive group, see Note [recursive SRTs])
           case maybeFunClosure of
             Just (staticFunLbl,staticFunBlock) ->
-                return ([], withLabels, [], True)
+                return ([], withLabels, [], MayHaveCafRefs)
               where
                 withLabels =
                   [ (b, if b == staticFunBlock then lbl else staticFunLbl)
@@ -1100,10 +1105,11 @@ oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
               srtTraceM "oneSRT: one" (text "caf_lbls:" <+> pdoc platform caf_lbls $$
                                        text "one:"      <+> pdoc platform one)
               updateSRTMap (Just one)
-              return ([], map (,lbl) blockids, [], True)
+              return ([], map (,lbl) blockids, [], MayHaveCafRefs)
 
       cafList | allStaticData ->
-        return ([], [], [], not (null cafList))
+        let caffiness = if null cafList then NoCafRefs else MayHaveCafRefs
+        in return ([], [], [], caffiness)
 
       cafList ->
         -- Check whether an SRT with the same entries has been emitted already.
@@ -1112,7 +1118,7 @@ oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
           Just srtEntry@(SRTEntry srtLbl)  -> do
             srtTraceM "oneSRT [Common]" (pdoc platform caf_lbls <+> pdoc platform srtLbl)
             updateSRTMap (Just srtEntry)
-            return ([], map (,srtLbl) blockids, [], True)
+            return ([], map (,srtLbl) blockids, [], MayHaveCafRefs)
           Nothing -> do
             -- No duplicates: we have to build a new SRT object
             (decls, funSRTs, srtEntry) <-
@@ -1136,7 +1142,7 @@ oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
                                       text "newDedupSRTs:" <+> pdoc platform newDedupSRTs $$
                                       text "newFlatSRTs:"  <+> pdoc platform newFlatSRTs)
             let SRTEntry lbl = srtEntry
-            return (decls, map (,lbl) blockids, funSRTs, True)
+            return (decls, map (,lbl) blockids, funSRTs, MayHaveCafRefs)
 
 
 -- | Build a static SRT object (or a chain of objects) from a list of
@@ -1181,9 +1187,9 @@ buildSRT profile refs = do
 -- static closures, splicing in SRT fields as necessary.
 updInfoSRTs
   :: Profile
-  -> LabelMap CLabel               -- SRT labels for each block
-  -> LabelMap [SRTEntry]           -- SRTs to merge into FUN_STATIC closures
-  -> Bool                          -- Whether the CmmDecl's group has CAF references
+  -> LabelMap CLabel               -- ^ SRT labels for each block
+  -> LabelMap [SRTEntry]           -- ^ SRTs to merge into FUN_STATIC closures
+  -> CafInfo                       -- ^ Whether the CmmDecl's group has CAF references
   -> CmmDecl
   -> [CmmDeclSRTs]
 
@@ -1193,14 +1199,12 @@ updInfoSRTs _ _ _ _ (CmmData s (CmmStaticsRaw lbl statics))
 updInfoSRTs profile _ _ caffy (CmmData s (CmmStatics lbl itbl ccs payload))
   = [CmmData s (CmmStaticsRaw lbl (map CmmStaticLit field_lits))]
   where
-    caf_info = if caffy then MayHaveCafRefs else NoCafRefs
-    field_lits = mkStaticClosureFields profile itbl ccs caf_info payload
+    field_lits = mkStaticClosureFields profile itbl ccs caffy payload
 
 updInfoSRTs profile srt_env funSRTEnv caffy (CmmProc top_info top_l live g)
   | Just (_,closure) <- maybeStaticClosure = [ proc, closure ]
   | otherwise = [ proc ]
   where
-    caf_info = if caffy then MayHaveCafRefs else NoCafRefs
     proc = CmmProc top_info { info_tbls = newTopInfo } top_l live g
     newTopInfo = mapMapWithKey updInfoTbl (info_tbls top_info)
     updInfoTbl l info_tbl
@@ -1225,12 +1229,12 @@ updInfoSRTs profile srt_env funSRTEnv caffy (CmmProc top_info top_l live g)
             Just srtEntries -> srtTrace "maybeStaticFun" (pdoc (profilePlatform profile) res)
               (info_tbl { cit_rep = new_rep }, res)
               where res = [ CmmLabel lbl | SRTEntry lbl <- srtEntries ]
-          fields = mkStaticClosureFields profile info_tbl ccs caf_info srtEntries
+          fields = mkStaticClosureFields profile info_tbl ccs caffy srtEntries
           new_rep = case cit_rep of
              HeapRep sta ptrs nptrs ty ->
                HeapRep sta (ptrs + length srtEntries) nptrs ty
              _other -> panic "maybeStaticFun"
-          lbl = mkClosureLabel (idName id) caf_info
+          lbl = mkClosureLabel (idName id) caffy
         in
           Just (newInfo, mkDataLits (Section Data lbl) lbl fields)
       | otherwise = Nothing
