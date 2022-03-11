@@ -831,21 +831,21 @@ loadParams from args = do
                             ]
   where
     use = repeat True -- fixme clean up
-    loadIfUsed fr tgt True = -- decl' tgt fr
-      mconcat [DeclStat tgt, toJExpr tgt |= fr]
-    loadIfUsed  _ _ _  = mempty
+    loadIfUsed fr tgt True = tgt ||= fr
+    loadIfUsed  _ _   _    = mempty
 
     loadConVarsIfUsed fr cs = mconcat $ zipWith f cs [(1::Int)..]
       where f (x,u) n = loadIfUsed (SelExpr fr (TxtI (dataFieldName n))) x u
 
 -- not a Monoid
 branchResult :: HasDebugCallStack => [ExprResult] -> ExprResult
-branchResult []           = panic "branchResult: empty list"
-branchResult [e]          = e
-branchResult (ExprCont:_) = ExprCont
-branchResult (_:es)
-  | elem ExprCont es      = ExprCont
-  | otherwise             = ExprInline Nothing
+branchResult = \case
+  []                   -> panic "branchResult: empty list"
+  [e]                  -> e
+  (ExprCont:_)         -> ExprCont
+  (_:es)
+    | elem ExprCont es -> ExprCont
+    | otherwise        -> ExprInline Nothing
 
 adjustCtxStack :: Int -> ExprCtx -> ExprCtx
 adjustCtxStack n ctx
