@@ -55,8 +55,10 @@ import GHC.Types.Name.Set
 
 {- Note [SRTs]
    ~~~~~~~~~~~
-SRTs are the mechanism by which the garbage collector can determine
-the live CAFs in the program.
+Static Reference Tables (SRTs) are the mechanism by which the garbage collector
+can determine the live CAFs in the program. An SRT is a static tables associated
+with a CAFfy static closure which record which CAFfy objects are reachable from
+the closure's code.
 
 Representation
 ^^^^^^^^^^^^^^
@@ -227,8 +229,9 @@ Algorithm
 1. Start with decls :: [CmmDecl]. This corresponds to an SCC of bindings in STG
    after code-generation.
 
-2. CPS-convert each CmmDecl (cpsTop), resulting in a list [CmmDecl]. There might
-   be multiple CmmDecls in the result, due to proc-point splitting.
+2. CPS-convert each CmmDecl (GHC.Cmm.Pipeline.cpsTop), resulting in a list
+   [CmmDecl]. There might be multiple CmmDecls in the result, due to proc-point
+   splitting.
 
 3. In cpsTop, *before* proc-point splitting, when we still have a single
    CmmDecl, we do cafAnal for procs:
@@ -273,8 +276,9 @@ Algorithm
      group to the SRT (see Note [Invalid optimisation: shortcutting])
    - Add to srtMap: lbls -> if null srt then Nothing else Just l
 
-9. At the end, for every top-level binding x, if srtMap x == Nothing, then the
-   binding is non-CAFFY, otherwise it is CAFFY.
+9. At the end, update the IdInfo for every top-level binding x:
+   if srtMap x == Nothing, then the binding is non-CAFFY, otherwise it is
+   CAFFY.
 
 Optimisations
 ^^^^^^^^^^^^^
@@ -473,16 +477,16 @@ non-CAFFY.
 -- |
 -- The label of a CAFfy thing.
 --
--- Labels that come from cafAnal can be:
+-- Labels that come from 'cafAnal' can be:
 --   - @_closure@ labels for static functions, static data constructor
 --     applications, or static thunks
 --   - @_info@ labels for dynamic functions, thunks, or continuations
 --   - @_entry@ labels for functions or thunks
 --
--- Meanwhile the labels on top-level blocks are @_entry labels.
+-- Meanwhile the labels on top-level blocks are @_entry@ labels.
 --
 -- To put everything in the same namespace we convert all labels to
--- closure labels using toClosureLbl.  Note that some of these
+-- closure labels using 'toClosureLbl'.  Note that some of these
 -- labels will not actually exist; that's ok because we're going to
 -- map them to SRTEntry later, which ranges over labels that do exist.
 --
@@ -499,7 +503,7 @@ mkCAFfyLabel platform lbl = CAFfyLabel (toClosureLbl platform lbl)
 
 -- |
 -- This is a label that we can put in an SRT.  It *must* be a closure label,
--- pointing to either a FUN_STATIC, THUNK_STATIC, or CONSTR.
+-- pointing to either a @FUN_STATIC@, @THUNK_STATIC@, or @CONSTR@.
 newtype SRTEntry = SRTEntry CLabel
   deriving (Eq, Ord)
 
@@ -521,6 +525,7 @@ addCafLabel platform l s
   | otherwise
   = s
 
+-- | Collect possible CAFfy references from a 'CmmData' decl.
 cafAnalData
   :: Platform
   -> CmmStatics
@@ -685,7 +690,7 @@ getBlockLabel (DeclLabel _) = Nothing
 getBlockLabels :: [SomeLabel] -> [Label]
 getBlockLabels = mapMaybe getBlockLabel
 
--- | Return a (Label,CLabel) pair for each labelled block of a CmmDecl,
+-- | Return a @(Label,CLabel)@ pair for each labelled block of a 'CmmDecl',
 --   where the label is
 --   - the info label for a continuation or dynamic closure
 --   - the closure label for a top-level function (not a CAF)
@@ -706,9 +711,10 @@ getLabelledBlocks platform decl = case decl of
 -- SRTs. CAFs themselves are not included here; see 'getCAFs' below.
 depAnalSRTs
   :: Platform
-  -> CAFEnv
-  -> Map CLabel CAFSet -- CAFEnv for statics
-  -> [CmmDecl]
+  -> CAFEnv            -- ^ 'CAFEnv' for procedures. From 'cafAnal'.
+  -> Map CLabel CAFSet -- ^ CAFEnv for statics. Maps statics to the set of the
+                       -- CAFfy things which they refer to. From 'cafAnalData'.
+  -> [CmmDecl]         -- ^ the decls to analyse.
   -> [SCC (SomeLabel, CAFfyLabel, Set CAFfyLabel)]
 depAnalSRTs platform cafEnv cafEnv_static decls =
   srtTrace "depAnalSRTs" (text "decls:"  <+> pdoc platform decls $$
@@ -720,6 +726,8 @@ depAnalSRTs platform cafEnv cafEnv_static decls =
   labelToBlock :: Map CAFfyLabel SomeLabel
   labelToBlock = foldl' (\m (v,k) -> Map.insert k v m) Map.empty labelledBlocks
 
+  -- the set of graph nodes. A node is identified by either a BlockLabel (in
+  -- the case of code) or a DeclLabel (in the case of static data).
   nodes :: [Node SomeLabel (SomeLabel, CAFfyLabel, Set CAFfyLabel)]
   nodes = [ DigraphNode (l,lbl,cafs') l
               (mapMaybe (flip Map.lookup labelToBlock) (Set.toList cafs'))
@@ -758,7 +766,7 @@ getCAFs platform cafEnv decls =
 
 
 -- | Get the list of blocks that correspond to the entry points for
--- FUN_STATIC closures.  These are the blocks for which if we have an
+-- @FUN_STATIC@ closures.  These are the blocks for which if we have an
 -- SRT we can merge it with the static closure. [FUN]
 getStaticFuns :: [CmmDecl] -> [(BlockId, CLabel)]
 getStaticFuns decls =
@@ -791,7 +799,7 @@ srtMapNonCAFs srtMap =
     get_name (CAFfyLabel l, Nothing) = hasHaskellName l
     get_name (_l, Just _srt_entry) = Nothing
 
--- | resolve a CAFfyLabel to its SRTEntry using the SRTMap
+-- | Resolve a CAFfyLabel to its 'SRTEntry' using the 'SRTMap'.
 resolveCAF :: Platform -> SRTMap -> CAFfyLabel -> Maybe SRTEntry
 resolveCAF platform srtMap lbl@(CAFfyLabel l) =
     srtTrace "resolveCAF" ("l:" <+> pdoc platform l <+> "resolved:" <+> pdoc platform ret) ret
@@ -803,14 +811,14 @@ anyCafRefs caf_infos = case any mayHaveCafRefs caf_infos of
                          True -> MayHaveCafRefs
                          False -> NoCafRefs
 
--- | Attach SRTs to all info tables in the CmmDecls, and add SRT
--- declarations to the ModuleSRTInfo.
+-- | Attach SRTs to all info tables in the 'CmmDecl's, and add SRT
+-- declarations to the 'ModuleSRTInfo'.
 --
 doSRTs
   :: CmmConfig
   -> ModuleSRTInfo
-  -> [(CAFEnv, [CmmDecl])]
-  -> [(CAFSet, CmmDecl)]
+  -> [(CAFEnv, [CmmDecl])]   -- ^ 'CAFEnv's and 'CmmDecl's for code blocks
+  -> [(CAFSet, CmmDecl)]     -- ^ static data decls and their 'CAFSet's
   -> IO (ModuleSRTInfo, [CmmDeclSRTs])
 
 doSRTs cfg moduleSRTInfo procs data_ = do
@@ -1146,7 +1154,7 @@ oneSRT cfg staticFuns lbls caf_lbls isCAF cafs static_data = do
 
 
 -- | Build a static SRT object (or a chain of objects) from a list of
--- SRTEntries.
+-- 'SRTEntry's.
 buildSRTChain
    :: Profile
    -> [SRTEntry]
