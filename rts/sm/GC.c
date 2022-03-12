@@ -2153,7 +2153,7 @@ void gcCAFs(void)
         // See Note [STATIC_LINK fields] in Storage.h
         // This condition identifies CAFs that have just been GC'd and
         // don't have static_link==3 which means they should be ignored.
-        if ((p->static_link & STATIC_BITS) != static_flag) {
+        if ((((StgWord)(p->static_link)&STATIC_BITS) | prev_static_flag) != 3) {
             debugTrace(DEBUG_gccafs, "CAF gc'd at %p", p);
             SET_INFO((StgClosure*)p,&stg_GCD_CAF_info); // stub it
             if (prev == NULL) {

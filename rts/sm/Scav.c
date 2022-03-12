@@ -1761,10 +1761,6 @@ scavenge_static(void)
      * and put it on the scavenged_static_objects list.
      */
     StgClosure **link = STATIC_LINK(info,p);
-    // the static flag should have been set by evacuate_static_object if it
-    // ended up on the static_objects list. See Note [STATIC_LINK fields].
-    ASSERT((StgWord) RELAXED_LOAD(link) & STATIC_BITS == static_flag);
-
     gct->static_objects = RELAXED_LOAD(link);
     RELAXED_STORE(link, gct->scavenged_static_objects);
     gct->scavenged_static_objects = flagged_p;
