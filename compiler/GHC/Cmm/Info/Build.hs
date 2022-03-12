@@ -415,6 +415,11 @@ from its code. In the past we have gotten this wrong in three ways:
 
 To see why we cannot allow object resurrection, see the examples in the
 above-mentioned Notes.
+
+
+Note [Data constructors must be included in recursive SRTs]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+TODO
 -}
 
 {-
