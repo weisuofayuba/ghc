@@ -37,6 +37,7 @@ module GHC.Tc.Errors.Types (
   , MissingSignature(..)
   , Exported(..)
   , HsDocContext(..)
+  , MustBeLiftedReason(..)
 
   , ErrorItem(..), errorItemOrigin, errorItemEqRel, errorItemPred, errorItemCtLoc
 
@@ -1660,6 +1661,14 @@ data TcRnMessage where
                                  -- (so we should give a Template Haskell hint)
                          -> TcRnMessage
 
+  {-| TcRnMustBeLifted is an error that occurs when an 'Id' has an unlifted type,
+      even though it appears in a context which requires it to be lifted, for example
+      because we want to put a variable with that 'Id' into a boxed tuple.
+
+      Test cases: T20864, T20855.
+  -}
+  TcRnMustBeLifted :: MustBeLiftedReason -> NE.NonEmpty Id -> TcRnMessage
+
 -- | Which parts of a record field are affected by a particular error or warning.
 data RecordFieldPart
   = RecordFieldConstructor !Name
@@ -1947,6 +1956,18 @@ data Exported
 instance Outputable Exported where
   ppr IsNotExported = text "IsNotExported"
   ppr IsExported    = text "IsExported"
+
+data MustBeLiftedReason
+  = ParStmtMustBeLifted
+  | TransStmtMustBeLifted
+  | RecStmtMustBeLifted
+  | ArrowRecStmtMustBeLifted
+
+instance Outputable MustBeLiftedReason where
+  ppr ParStmtMustBeLifted      = text "parallel list comprehension"
+  ppr TransStmtMustBeLifted    = text "transform list comprehension"
+  ppr RecStmtMustBeLifted      = text "recursive statement"
+  ppr ArrowRecStmtMustBeLifted = text "arrow recursive statement"
 
 --------------------------------------------------------------------------------
 --

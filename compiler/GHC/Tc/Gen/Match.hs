@@ -31,6 +31,8 @@ module GHC.Tc.Gen.Match
    , tcBody
    , tcDoStmt
    , tcGuardStmt
+
+   , lookupBigTupIds
    )
 where
 
@@ -78,6 +80,7 @@ import GHC.Types.SrcLoc
 
 import Control.Monad
 import Control.Arrow ( second )
+import Data.List.NonEmpty ( NonEmpty((:|)))
 
 {-
 ************************************************************************
@@ -498,7 +501,7 @@ tcLcStmt m_tc ctxt (ParStmt _ bndr_stmts_s _ _) elt_ty thing_inside
     loop (ParStmtBlock x stmts names _ : pairs)
       = do { (stmts', (ids, pairs', thing))
                 <- tcStmtsAndThen ctxt (tcLcStmt m_tc) stmts elt_ty $ \ _elt_ty' ->
-                   do { ids <- tcLookupLocalIds names
+                   do { ids <- lookupBigTupIds ParStmtMustBeLifted names
                       ; (pairs', thing) <- loop pairs
                       ; return (ids, pairs', thing) }
            ; return ( ParStmtBlock x stmts' ids noSyntaxExpr : pairs', thing ) }
@@ -513,7 +516,7 @@ tcLcStmt m_tc ctxt (TransStmt { trS_form = form, trS_stmts = stmts
        ; (stmts', (bndr_ids, by'))
             <- tcStmtsAndThen (TransStmtCtxt ctxt) (tcLcStmt m_tc) stmts unused_ty $ \_ -> do
                { by' <- traverse tcInferRho by
-               ; bndr_ids <- tcLookupLocalIds bndr_names
+               ; bndr_ids <- lookupBigTupIds TransStmtMustBeLifted bndr_names
                ; return (bndr_ids, by') }
 
        ; let m_app ty = mkTyConApp m_tc [ty]
@@ -550,7 +553,7 @@ tcLcStmt m_tc ctxt (TransStmt { trS_form = form, trS_stmts = stmts
 
              -- Ensure that every old binder of type `b` is linked up with its
              -- new binder which should have type `n b`
-             -- See Note [GroupStmt binder map] in GHC.Hs.Expr
+             -- See Note [TransStmt binder map] in Language.Haskell.Syntax.Expr
              n_bndr_ids  = zipWith mk_n_bndr n_bndr_names bndr_ids
              bindersMap' = bndr_ids `zip` n_bndr_ids
 
@@ -703,7 +706,7 @@ tcMcStmt ctxt (TransStmt { trS_stmts = stmts, trS_bndrs = bindersMap
                                          ; return (Just e') }
 
                 -- Find the Ids (and hence types) of all old binders
-                ; bndr_ids <- tcLookupLocalIds bndr_names
+                ; bndr_ids <- lookupBigTupIds TransStmtMustBeLifted bndr_names
 
                 -- 'return' is only used for the binders, so we know its type.
                 --   return :: (a,b,c,..) -> m (a,b,c,..)
@@ -743,7 +746,7 @@ tcMcStmt ctxt (TransStmt { trS_stmts = stmts, trS_bndrs = bindersMap
 
              -- Ensure that every old binder of type `b` is linked up with its
              -- new binder which should have type `n b`
-             -- See Note [GroupStmt binder map] in GHC.Hs.Expr
+             -- See Note [TransStmt binder map] in Language.Haskell.Syntax.Expr
              n_bndr_ids = zipWithEqual "tcMcStmt" mk_n_bndr n_bndr_names bndr_ids
              bindersMap' = bndr_ids `zip` n_bndr_ids
 
@@ -835,7 +838,7 @@ tcMcStmt ctxt (ParStmt _ bndr_stmts_s mzip_op bind_op) res_ty thing_inside
            ; (stmts', (ids, return_op', pairs', thing))
                 <- tcStmtsAndThen ctxt tcMcStmt stmts (mkCheckExpType m_tup_ty) $
                    \m_tup_ty' ->
-                   do { ids <- tcLookupLocalIds names
+                   do { ids <- lookupBigTupIds ParStmtMustBeLifted names
                       ; let tup_ty = mkBigCoreVarTupTy ids
                       ; (_, return_op') <-
                           tcSyntaxOp MCompOrigin return_op
@@ -953,7 +956,7 @@ tcDoStmt ctxt (RecStmt { recS_stmts = L l stmts, recS_later_ids = later_names
                   ; return (thing, new_res_ty) }
 
         ; let rec_ids = takeList rec_names tup_ids
-        ; later_ids <- tcLookupLocalIds later_names
+        ; later_ids <- lookupBigTupIds RecStmtMustBeLifted later_names
         ; traceTc "tcdo" $ vcat [ppr rec_ids <+> ppr (map idType rec_ids),
                                  ppr later_ids <+> ppr (map idType later_ids)]
         ; return (RecStmt { recS_stmts = L l stmts', recS_later_ids = later_ids
@@ -1164,3 +1167,26 @@ checkArgs fun (MG { mg_alts = L _ (match1:matches) })
 
     args_in_match :: (LocatedA (Match GhcRn body1) -> Int)
     args_in_match (L _ (Match { m_pats = pats })) = length pats
+
+{-**********************************************************************
+*                                                                      *
+\subsection{Ensuring liftedness}
+*                                                                      *
+**********************************************************************-}
+
+-- | Given a list of binder names, this function:
+--
+--  - looks up the associated local 'Id's using 'tcLookupLocalIds'
+--  - ensures their types are all lifted, throwing an error in the 'TcM' monad
+--    if this is not the case.
+lookupBigTupIds :: MustBeLiftedReason -> [Name] -> TcM [TcId]
+lookupBigTupIds why names
+  = do { ids <- tcLookupLocalIds names
+       ; bad_ids <- filterM is_bad ids
+       ; case bad_ids of
+           []       -> return ids
+           bad:bads -> failWithTc (TcRnMustBeLifted why (bad :| bads)) }
+
+  where
+    is_bad :: TcId -> TcM Bool
+    is_bad v = not <$> idType v `unifyTypeRuntimeRep` liftedRepTy

@@ -1,6 +1,7 @@
+{-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
-{-# LANGUAGE RecursiveDo       #-}
+{-# LANGUAGE RecursiveDo         #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns   #-}
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
@@ -24,6 +25,8 @@ module GHC.Tc.Utils.Unify (
   unifyType, unifyKind, unifyExpectedType,
   uType, promoteTcType,
   swapOverTyVars, canSolveByUnification,
+
+  unifyTypeRuntimeRep, unifySyn,
 
   --------------------------------
   -- Holes
@@ -1365,8 +1368,124 @@ If available, we defer original types (rather than those where closed type
 synonyms have already been expanded via tcCoreView).  This is, as usual, to
 improve error messages.
 
+%************************************************************************
+%*                                                                      *
+                       Syntactic unification
+%*                                                                      *
+%************************************************************************
 
-************************************************************************
+-}
+
+-- | Given a type @ty :: TYPE rr@ and a desired 'RuntimeRep' @desired_rr@,
+-- this function attempts to syntactically unify @rr@ with @desired_rr@,
+-- returning whether it succeeded.
+--
+-- Preconditions:
+--   - The kind of @ty@ must be of the form @TYPE rr@ where
+--     @rr@ is a fixed RuntimeRep, in the sense of Note [Fixed RuntimeRep]
+--     in GHC.Tc.Utils.Concrete.
+--   - @desired_rr@ must be a concrete 'RuntimeRep' in the sense of
+--     Note [Concrete types] in GHC.Tc.Utils.Concrete, and must not
+--     contain any type variables.
+unifyTypeRuntimeRep :: HasDebugCallStack
+                    => Type -- ^ type to constrain (e.g. @ty :: TYPE rr@)
+                    -> Type -- ^ desired 'RuntimeRep' (e.g. 'liftedRepTy')
+                    -> TcM Bool
+unifyTypeRuntimeRep ty desired_rr
+  = do { res <- unifySyn rr desired_rr
+       ; traceTc "unifyTypeRuntimeRep" $
+          vcat [ text "ty:" <+> ppr ty
+               , text "rr:" <+> ppr rr
+               , text "desired_rr:" <+> ppr desired_rr
+               , text "OK:" <+> ppr res ]
+       ; return res }
+  where
+    rr = getRuntimeRep ty
+
+-- | Syntactically unify two types. Looks through filled metavariables,
+-- but does not do any rewriting, nor does it ever defer work to the
+-- constraint solver (this function never emits any constraints).
+--
+-- Preconditions:
+--    - The LHS and RHS types are both concrete, in the sense of
+--      Note [Concrete types] in GHC.Tc.Utils.Concrete.
+--    - The RHS does not contain any type variables.
+--    - The LHS and RHS have the same exact kind.
+unifySyn :: HasDebugCallStack => Type -> Type -> TcM Bool
+unifySyn ty desired_ty
+  = do { massertPpr (conc1 && conc2)
+           (vcat [ text "unifySyn: non-concrete" <+> what_not_conc
+                 , text "LHS:" <+> ppr ty
+                 , text "RHS:" <+> ppr desired_ty ])
+       ; massertPpr (isEmptyVarSet rhs_tcvs)
+          (vcat [ text "unifySyn: RHS contains type variables"
+                , text "LHS:" <+> ppr ty
+                , text "RHS:" <+> ppr desired_ty
+                , text "RHS tcvs:" <+> ppr rhs_tcvs ])
+       ; massertPpr (ki1 `tcEqType` ki2)
+           (vcat [ text "unifySyn: kind mismatch"
+                 , text "LHS:" <+> ppr ty <+> dcolon <+> ppr ki1
+                 , text "RHS:" <+> ppr desired_ty <+> dcolon <+> ppr ki2 ])
+       ; go ty desired_ty }
+  where
+    ki1, ki2 :: Kind
+    ki1 = typeKind ty
+    ki2 = typeKind desired_ty
+    conc1, conc2 :: Bool
+    conc1 = isConcrete ty
+    conc2 = isConcrete desired_ty
+    what_not_conc :: SDoc
+    what_not_conc
+      | not conc1 && not conc2
+      = text "LHS and RHS"
+      | not conc1
+      = text "LHS"
+      | otherwise
+      = text "RHS"
+    rhs_tcvs :: TyCoVarSet
+    rhs_tcvs = tyCoVarsOfType desired_ty
+
+    go :: Type -> Type -> TcM Bool
+    go ty desired_ty
+      | Just ty <- tcView ty
+      = unifySyn ty desired_ty
+      | ty `tcEqType` desired_ty
+      = return True
+    go (TyVarTy tv) desired_ty
+      = do { mb_filled <- isFilledMetaTyVar_maybe tv
+           ; case mb_filled of
+           { Just ty -> unifySyn ty desired_ty
+           ; Nothing ->
+        do { cur_lvl <- getTcLevel
+           ; if
+               | isTouchableMetaTyVar cur_lvl tv
+               , canSolveByUnification (metaTyVarInfo tv) desired_ty
+               -> do { writeMetaTyVar tv desired_ty
+                     ; return True }
+               | otherwise
+               -> return False } } }
+    go (TyConApp tc1 tys1) (TyConApp tc2 tys2)
+      | tc1 == tc2, equalLength tys1 tys2
+      = and <$> zipWithM unifySyn tys1 tys2
+    go (FunTy { ft_af = af1, ft_mult = m1, ft_arg = arg1, ft_res = res1 })
+       (FunTy { ft_af = af2, ft_mult = m2, ft_arg = arg2, ft_res = res2 })
+      | af1 == af2
+      = and <$> zipWithM unifySyn [m1, arg1, res1] [m2, arg2, res2]
+    go (AppTy l1 r1) (TyConApp tc tys)
+      | Just (tys', r2) <- snocView tys
+      , let l2 = TyConApp tc tys'
+      = and <$> zipWithM unifySyn [l1, r1] [l2, r2]
+    go lhs rhs@(AppTy {})
+      = pprPanic "unifySyn: AppTy RHS"
+         (vcat [ text "LHS:" <+> ppr lhs
+               , text "RHS:" <+> ppr rhs])
+    go (LitTy m) (LitTy n)
+      | m == n
+      = return True
+    go _ _
+      = return False
+
+{-**********************************************************************
 *                                                                      *
                  uUnfilledVar and friends
 *                                                                      *

@@ -71,8 +71,6 @@ ref    compiler/GHC/Tc/Gen/Expr.hs:1298:11:     Note [Deprecating ambiguous fiel
 ref    compiler/GHC/Tc/Gen/Foreign.hs:149:26:     Note [Expanding newtypes]
 ref    compiler/GHC/Tc/Gen/HsType.hs:552:56:     Note [Skolem escape prevention]
 ref    compiler/GHC/Tc/Gen/HsType.hs:2623:7:     Note [Matching a kind sigature with a declaration]
-ref    compiler/GHC/Tc/Gen/Match.hs:553:20:     Note [GroupStmt binder map]
-ref    compiler/GHC/Tc/Gen/Match.hs:746:20:     Note [GroupStmt binder map]
 ref    compiler/GHC/Tc/Gen/Match.hs:1011:0:     Note [typechecking ApplicativeStmt]
 ref    compiler/GHC/Tc/Gen/Pat.hs:169:20:     Note [Typing patterns in pattern bindings]
 ref    compiler/GHC/Tc/Gen/Pat.hs:476:7:     Note [Pattern coercions]

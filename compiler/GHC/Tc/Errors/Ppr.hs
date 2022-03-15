@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-} -- instance Diagnostic TcRnMessage
 
@@ -692,7 +693,23 @@ instance Diagnostic TcRnMessage where
                      , text "in the following constraint" <> plural tidy_wanteds ])
              2
              (pprWithArising tidy_wanteds)
+    TcRnMustBeLifted ctxt (NE.toList -> bad_ids)
+      -> mkSimpleDecorated $
+           (vcat
+             ( hsep [ text "Expected" <+> what <> comma
+                    , text "but the following variable" <> plural bad_ids <+> isOrAre bad_ids <+> text "unlifted:" ]
+             : (map ppr_id bad_ids ++ [info])))
 
+        where
+          what :: SDoc
+          what = case bad_ids of { [_] -> text "a lifted variable"; _ -> text "lifted variables"}
+          ppr_id :: Id -> SDoc
+          ppr_id v = bullet <+> ppr v <+> dcolon <+> ppr ty <+> dcolon <+> ppr ki
+            where
+              ty = idType v
+              ki = typeKind ty
+          info :: SDoc
+          info = text "NB: variables used in" <+> ppr ctxt <> text "s" <+> text "must be lifted."
 
   diagnosticReason = \case
     TcRnUnknownMessage m
@@ -931,6 +948,8 @@ instance Diagnostic TcRnMessage where
       -> ErrorWithoutFlag
     TcRnWarnDefaulting {}
       -> WarningWithFlag Opt_WarnTypeDefaults
+    TcRnMustBeLifted {}
+      -> ErrorWithoutFlag
 
   diagnosticHints = \case
     TcRnUnknownMessage m
@@ -1165,6 +1184,8 @@ instance Diagnostic TcRnMessage where
     TcRnIllegalBuiltinSyntax {}
       -> noHints
     TcRnWarnDefaulting {}
+      -> noHints
+    TcRnMustBeLifted {}
       -> noHints
 
 deriveInstanceErrReasonHints :: Class
