@@ -4,7 +4,7 @@
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  GHC.JS.Rts.Rts
+-- Module      :  GHC.StgToJS.Rts.Rts
 -- Copyright   :  (c) The University of Glasgow 2001
 -- License     :  BSD-style (see the file LICENSE)
 --
@@ -26,7 +26,9 @@
 --
 -----------------------------------------------------------------------------
 
-module GHC.JS.Rts.Rts where
+module GHC.StgToJS.Rts.Rts where
+
+import GHC.Prelude
 
 import GHC.JS.Syntax
 import GHC.JS.Make
@@ -37,16 +39,16 @@ import GHC.StgToJS.Monad
 import GHC.StgToJS.Profiling
 import GHC.StgToJS.Regs
 import GHC.StgToJS.Types
-import GHC.JS.Rts.Apply
+import GHC.StgToJS.Rts.Apply
 
 import qualified GHC.Data.ShortText as T
 
 import Data.Array
+import Data.Monoid
 import Data.Char (toLower, toUpper)
 import qualified Data.Bits          as Bits
 import qualified Data.Map           as M
 
-import           Prelude
 
 -----------------------------------------------------------------------------
 --

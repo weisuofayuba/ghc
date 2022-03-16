@@ -3,7 +3,7 @@
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  GHC.JS.Rts.Apply
+-- Module      :  GHC.StgToJS.Rts.Apply
 -- Copyright   :  (c) The University of Glasgow 2001
 -- License     :  BSD-style (see the file LICENSE)
 --
@@ -25,12 +25,14 @@
 --  FIXME: add selector thunks and let the gc follow them
 -----------------------------------------------------------------------------
 
-module GHC.JS.Rts.Apply where
+module GHC.StgToJS.Rts.Apply where
+
+import GHC.Prelude hiding ((.|.))
 
 import GHC.JS.Syntax
 import GHC.JS.Make
-import GHC.JS.Rts.Types
 
+import GHC.StgToJS.Rts.Types
 import GHC.StgToJS.DataCon
 import GHC.StgToJS.Heap
 import GHC.StgToJS.Monad
@@ -43,7 +45,6 @@ import GHC.Data.ShortText
 
 import qualified Data.Bits as Bits
 import Data.Semigroup ((<>))
-import GHC.Prelude hiding ((.|.))
 import Data.Array
 
 rtsApply :: StgToJSConfig -> JStat
