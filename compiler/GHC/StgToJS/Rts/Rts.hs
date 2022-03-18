@@ -34,12 +34,12 @@ import GHC.JS.Syntax
 import GHC.JS.Make
 import GHC.JS.Transform
 
+import GHC.StgToJS.Apply
 import GHC.StgToJS.Heap
 import GHC.StgToJS.Monad
 import GHC.StgToJS.Profiling
 import GHC.StgToJS.Regs
 import GHC.StgToJS.Types
-import GHC.StgToJS.Rts.Apply
 
 import qualified GHC.Data.ShortText as T
 
