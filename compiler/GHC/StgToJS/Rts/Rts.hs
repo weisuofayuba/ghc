@@ -35,6 +35,7 @@ import GHC.JS.Make
 import GHC.JS.Transform
 
 import GHC.StgToJS.Apply
+import GHC.StgToJS.Closure
 import GHC.StgToJS.Heap
 import GHC.StgToJS.Monad
 import GHC.StgToJS.Profiling

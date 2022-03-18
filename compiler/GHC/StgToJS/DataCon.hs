@@ -15,7 +15,7 @@ import GHC.Prelude
 import GHC.JS.Syntax
 import GHC.JS.Make
 
-import GHC.StgToJS.Heap
+import GHC.StgToJS.Closure
 import GHC.StgToJS.Types
 import GHC.StgToJS.Monad
 import GHC.StgToJS.CoreUtils

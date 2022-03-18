@@ -35,9 +35,6 @@ module GHC.StgToJS.Apply
   ( genApp
   , mkApplyArr
   , rtsApply
-    --FIXME Sylvain (2022/03): move these functions
-  , closure
-  , conClosure
   )
 where
 
@@ -47,6 +44,7 @@ import GHC.JS.Syntax
 import GHC.JS.Make
 
 import GHC.StgToJS.Arg
+import GHC.StgToJS.Closure
 import GHC.StgToJS.DataCon
 import GHC.StgToJS.Heap
 import GHC.StgToJS.Monad
@@ -974,14 +972,3 @@ initClosure cfg entry values ccs =
                           , values
                           ]
 
--- FIXME: where to put this
-closure :: ClosureInfo -- ^ object being info'd see @ciVar@ in @ClosureInfo@
-        -> JStat       -- ^ rhs
-        -> JStat
-closure ci body = (TxtI (ciVar ci)||= jLam body) `mappend` toStat ci
-
--- FIXME: where to put this
-conClosure :: ShortText -> ShortText -> CILayout -> Int -> JStat
-conClosure symbol name layout constr =
-  closure (ClosureInfo symbol (CIRegs 0 [PtrV]) name layout (CICon constr) mempty)
-          (returnS (stack .! sp))

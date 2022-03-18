@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module GHC.StgToJS.Heap
   ( closureType
@@ -26,11 +25,6 @@ module GHC.StgToJS.Heap
   , funArity'
   , papArity
   , funOrPapArity
-  , Closure (..)
-  , newClosure
-  , assignClosure
-  , CopyCC (..)
-  , copyClosure
   -- * Field names
   , closureEntry_
   , closureMeta_
@@ -48,8 +42,6 @@ import GHC.JS.Syntax
 import GHC.JS.Make
 import GHC.StgToJS.Types
 import GHC.Data.ShortText (ShortText)
-
-import Data.Monoid
 
 -- FIXME: Jeff (2022,03): These helpers are a classic case of using a newtype
 -- over a type synonym to leverage GHC's type checker. Basically we never want
@@ -176,47 +168,3 @@ funOrPapArity c = \case
              (toJExpr (papArity c))
   Just f  -> ((IfExpr (toJExpr (isFun' f))) (toJExpr (funArity' f)))
              (toJExpr (papArity c))
-
--- | Used to pass arguments to newClosure with some safety
-data Closure = Closure
-  { clEntry  :: JExpr
-  , clExtra1 :: JExpr
-  , clExtra2 :: JExpr
-  , clMeta   :: JExpr
-  , clCC     :: Maybe JExpr
-  }
-
-newClosure :: Closure -> JExpr
-newClosure Closure{..} =
-  let xs = [ (closureEntry_ , clEntry)
-           , (closureExtra1_, clExtra1)
-           , (closureExtra2_, clExtra2)
-           , (closureMeta_  , clMeta)
-           ]
-  in case clCC of
-    -- CC field is optional (probably to minimize code size as we could assign
-    -- null_, but we get the same effect implicitly)
-    Nothing -> ValExpr (jhFromList xs)
-    Just cc -> ValExpr (jhFromList $ (closureCC_,cc) : xs)
-
-assignClosure :: JExpr -> Closure -> JStat
-assignClosure t Closure{..} = BlockStat
-  [ closureEntry  t |= clEntry
-  , closureExtra1 t |= clExtra1
-  , closureExtra2 t |= clExtra2
-  , closureMeta   t |= clMeta
-  ] <> case clCC of
-      Nothing -> mempty
-      Just cc -> closureCC t |= cc
-
-data CopyCC = CopyCC | DontCopyCC
-
-copyClosure :: CopyCC -> JExpr -> JExpr -> JStat
-copyClosure copy_cc t s = BlockStat
-  [ closureEntry  t |= closureEntry  s
-  , closureExtra1 t |= closureExtra1 s
-  , closureExtra2 t |= closureExtra2 s
-  , closureMeta   t |= closureMeta   s
-  ] <> case copy_cc of
-      DontCopyCC -> mempty
-      CopyCC     -> closureCC t |= closureCC s

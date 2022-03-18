@@ -596,6 +596,7 @@ Library
         GHC.StgToJS
         GHC.StgToJS.Apply
         GHC.StgToJS.Arg
+        GHC.StgToJS.Closure
         GHC.StgToJS.CodeGen
         GHC.StgToJS.CoreUtils
         GHC.StgToJS.DataCon
