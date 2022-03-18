@@ -229,7 +229,7 @@ jumpToII i args afterLoad
      return $ mconcat
       [ ra
       , afterLoad
-      , returnS (ii .^ "f")
+      , returnS (closureEntry ii)
       ]
   | otherwise   = do
      ei <- jsEntryId i
@@ -367,7 +367,7 @@ genericStackApply s =
                  , (toJExpr Pap,   funCase cf (papArity r1))
                  , (toJExpr Blackhole, push' s [r1, var "h$return"]
                      <> returnS (app "h$blockOnBlackhole" [r1]))
-                 ] (appS "throw" [jString "h$ap_gen: unexpected closure type " + (cf .^ "t")])
+                 ] (appS "throw" [jString "h$ap_gen: unexpected closure type " + (entryClosureType cf)])
                ]
             )
   where
@@ -452,7 +452,7 @@ genericFastApply s =
             <> pushStackApply c tag
             <> push' s [r1, var "h$return"]
             <> returnS (app "h$blockOnBlackhole" [r1]))
-        ] $ appS "throw" [jString "h$ap_gen_fast: unexpected closure type: " + c .^ "t"]
+        ] $ appS "throw" [jString "h$ap_gen_fast: unexpected closure type: " + entryClosureType c]
       ]
 
   where
@@ -553,7 +553,7 @@ stackApply s r n =
                , (toJExpr Fun, traceRts s (toJExpr $ funcName <> ": fun") <> funCase c)
                , (toJExpr Pap, traceRts s (toJExpr $ funcName <> ": pap") <> papCase c)
                , (toJExpr Blackhole, push' s [r1, var "h$return"] <> returnS (app "h$blockOnBlackhole" [r1]))
-               ] (appS "throw" [toJExpr ("panic: " <> funcName <> ", unexpected closure type: ") + (c .^ "t")])
+               ] (appS "throw" [toJExpr ("panic: " <> funcName <> ", unexpected closure type: ") + (entryClosureType c)])
              ]
 
     funExact c = popSkip' 1 (reverse $ take r (map toJExpr $ enumFrom R2)) <> returnS c
@@ -661,7 +661,7 @@ fastApply s r n = func ||= toJExpr (JFunc myFunArgs body)
              ,(toJExpr Pap, traceRts s (toJExpr (funName <> ": pap")) <> (arity |= papArity r1) <> funCase c arity)
              ,(toJExpr Thunk, traceRts s (toJExpr (funName <> ": thunk")) <> push' s (reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r) <> profStat s pushRestoreCCS <> returnS c)
              ,(toJExpr Blackhole, traceRts s (toJExpr (funName <> ": blackhole")) <> push' s (reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r) <> push' s [r1, var "h$return"] <> returnS (app "h$blockOnBlackhole" [r1]))]
-             (appS "throw" [toJExpr (funName <> ": unexpected closure type: ") + c .^ "t"])
+             (appS "throw" [toJExpr (funName <> ": unexpected closure type: ") + entryClosureType c])
           ]
 
       funCase :: JExpr -> JExpr -> JStat
