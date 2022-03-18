@@ -74,8 +74,8 @@ allocDynamicE :: StgToJSConfig -> JExpr -> [JExpr] -> Maybe JExpr -> JExpr
 allocDynamicE s entry free cc
   | csInlineAlloc s || length free > 24 = newClosure $ Closure
       { clEntry  = entry
-      , clExtra1 = fillObj1
-      , clExtra2 = fillObj2
+      , clField1 = fillObj1
+      , clField2 = fillObj2
       , clMeta   = ValExpr (JInt 0)
       , clCC     = cc
       }

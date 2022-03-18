@@ -143,7 +143,7 @@ genApp ctx i args
       is <- genIds i
       case is of
         [i'] ->
-          return ( c |= if_ (isObject i') (i' .^ closureExtra1_) i'
+          return ( c |= if_ (isObject i') (closureField1 i') i'
                  , ExprInline Nothing
                  )
         _ -> panic "genApp: invalid size"
@@ -723,7 +723,7 @@ enter :: StgToJSConfig -> JExpr -> JStat
 enter s ex = jVar \c ->
   [ jwhenS (app "typeof" [ex] .!==. jTyObject) returnStack
   , c |= closureEntry ex
-  , jwhenS (c .===. var "h$unbox_e") ((r1 |= closureExtra1 ex) <> returnStack)
+  , jwhenS (c .===. var "h$unbox_e") ((r1 |= closureField1 ex) <> returnStack)
   , SwitchStat (entryClosureType c)
     [ (toJExpr Con, mempty)
     , (toJExpr Fun, mempty)
@@ -740,8 +740,8 @@ updates s = BlockStat
       $ jVar \updatee waiters ss si sir ->
             let unbox_closure = Closure
                   { clEntry  = var "h$unbox_e"
-                  , clExtra1 = sir
-                  , clExtra2 = null_
+                  , clField1 = sir
+                  , clField2 = null_
                   , clMeta   = 0
                   , clCC     = Nothing
                   }
@@ -749,7 +749,7 @@ updates s = BlockStat
             in [ updatee |= stack .! (sp - 1)
                , traceRts s (jString "h$upd_frame updatee alloc: " + updatee .^ "alloc")
                , -- wake up threads blocked on blackhole
-                 waiters |= closureExtra2 updatee
+                 waiters |= closureField2 updatee
                , jwhenS (waiters .!==. null_)
                            (loop 0 (.<. waiters .^ "length")
                               (\i -> appS "h$wakeupThread" [waiters .! i] <> postIncrS i))
@@ -758,7 +758,7 @@ updates s = BlockStat
                  ((ss |= closureMeta updatee .^ "sel")
                    <> loop 0 (.<. ss .^ "length") \i -> mconcat
                         [ si |= ss .! i
-                        , sir |= (closureExtra2 si) `ApplExpr` [r1]
+                        , sir |= (closureField2 si) `ApplExpr` [r1]
                         , ifS (app "typeof" [sir] .===. jTyObject)
                             (copyClosure DontCopyCC si sir)
                             (assignClosure si unbox_closure)
@@ -795,14 +795,14 @@ updates s = BlockStat
 
 selectors :: StgToJSConfig -> JStat
 selectors s =
-  mkSel "1"      closureExtra1
-  <> mkSel "2a"  closureExtra2
-  <> mkSel "2b"  (closureExtra1 . closureExtra2)
+  mkSel "1"      closureField1
+  <> mkSel "2a"  closureField2
+  <> mkSel "2b"  (closureField1 . closureField2)
   <> mconcat (map mkSelN [3..16])
    where
     mkSelN :: Int -> JStat
     mkSelN x = mkSel (ST.pack $ show x)
-                     (\e -> SelExpr (closureExtra2 (toJExpr e))
+                     (\e -> SelExpr (closureField2 (toJExpr e))
                             (TxtI $ ST.pack ("d" ++ show (x-1))))
 
 
@@ -821,7 +821,7 @@ selectors s =
       , closure
         (ClosureInfo entryName (CIRegs 0 [PtrV]) ("select " <> name) (CILayoutFixed 1 [PtrV]) CIThunk mempty)
         (jVar \tgt ->
-          [ tgt |= closureExtra1 r1
+          [ tgt |= closureField1 r1
           , traceRts s (toJExpr ("selector entry: " <> name <> " for ") + (tgt .^ "alloc"))
           , ifS (isThunk tgt .||. isBlackhole tgt)
               (preIncrS sp
@@ -887,8 +887,8 @@ pap s r = closure (ClosureInfo funcName CIRegsUnknown funcName (CILayoutUnknown 
     funcName = ST.pack ("h$pap_" ++ show r)
 
     body = jVar \c d f extra ->
-             [ c |= closureExtra1 r1
-             , d |= closureExtra2 r1
+             [ c |= closureField1 r1
+             , d |= closureField2 r1
              , f |= closureEntry  c
              , assertRts s (isFun' f .||. isPap' f) (funcName <> ": expected function or pap")
              , profStat s (enterCostCentreFun currentCCS)
@@ -911,8 +911,8 @@ papGen :: StgToJSConfig -> JStat
 papGen cfg =
    closure (ClosureInfo funcName CIRegsUnknown funcName CILayoutVariable CIPap mempty)
            (jVar \c f d pr or r ->
-              [ c |= closureExtra1 r1
-              , d |= closureExtra2 r1
+              [ c |= closureField1 r1
+              , d |= closureField2 r1
               , f |= closureEntry  c
               , pr |= funOrPapArity c (Just f) .>>. 8
               , or |= papArity r1 .>>. 8
@@ -964,8 +964,8 @@ initClosure cfg entry values ccs =
          | otherwise  = Nothing
   in app "h$init_closure" [ newClosure $ Closure
                               { clEntry  = entry
-                              , clExtra1 = null_
-                              , clExtra2 = null_
+                              , clField1 = null_
+                              , clField2 = null_
                               , clMeta   = 0
                               , clCC     = cc
                               }

@@ -18,8 +18,8 @@ module GHC.StgToJS.Heap
   , conTag'
   , closureEntry
   , closureMeta
-  , closureExtra1
-  , closureExtra2
+  , closureField1
+  , closureField2
   , closureCC
   , funArity
   , funArity'
@@ -29,8 +29,8 @@ module GHC.StgToJS.Heap
   , closureEntry_
   , closureMeta_
   , closureCC_
-  , closureExtra1_
-  , closureExtra2_
+  , closureField1_
+  , closureField2_
   -- * Javascript Type literals
   , jTyObject
   )
@@ -61,11 +61,11 @@ import GHC.Data.ShortText (ShortText)
 closureEntry_ :: ShortText
 closureEntry_ = "f"
 
-closureExtra1_ :: ShortText
-closureExtra1_ = "d1"
+closureField1_ :: ShortText
+closureField1_ = "d1"
 
-closureExtra2_ :: ShortText
-closureExtra2_ = "d2"
+closureField2_ :: ShortText
+closureField2_ = "d2"
 
 closureMeta_ :: ShortText
 closureMeta_ = "m"
@@ -140,12 +140,12 @@ closureCC :: JExpr -> JExpr
 closureCC p = p .^ closureCC_
 
 -- | Get closure extra field 1
-closureExtra1 :: JExpr -> JExpr
-closureExtra1 p = p .^ closureExtra1_
+closureField1 :: JExpr -> JExpr
+closureField1 p = p .^ closureField1_
 
 -- | Get closure extra field 2
-closureExtra2 :: JExpr -> JExpr
-closureExtra2 p = p .^ closureExtra2_
+closureField2 :: JExpr -> JExpr
+closureField2 p = p .^ closureField2_
 
 -- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of registers)
 funArity :: JExpr -> JExpr
@@ -157,7 +157,7 @@ funArity' f = f .^ entryFunArity_
 
 -- arity of a partial application
 papArity :: JExpr -> JExpr
-papArity cp = closureExtra1 (closureExtra2 cp)
+papArity cp = closureField1 (closureField2 cp)
 
 funOrPapArity
   :: JExpr       -- ^ heap object

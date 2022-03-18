@@ -115,8 +115,8 @@ conClosure symbol name layout constr =
 -- | Used to pass arguments to newClosure with some safety
 data Closure = Closure
   { clEntry  :: JExpr
-  , clExtra1 :: JExpr
-  , clExtra2 :: JExpr
+  , clField1 :: JExpr
+  , clField2 :: JExpr
   , clMeta   :: JExpr
   , clCC     :: Maybe JExpr
   }
@@ -124,8 +124,8 @@ data Closure = Closure
 newClosure :: Closure -> JExpr
 newClosure Closure{..} =
   let xs = [ (closureEntry_ , clEntry)
-           , (closureExtra1_, clExtra1)
-           , (closureExtra2_, clExtra2)
+           , (closureField1_, clField1)
+           , (closureField2_, clField2)
            , (closureMeta_  , clMeta)
            ]
   in case clCC of
@@ -137,8 +137,8 @@ newClosure Closure{..} =
 assignClosure :: JExpr -> Closure -> JStat
 assignClosure t Closure{..} = BlockStat
   [ closureEntry  t |= clEntry
-  , closureExtra1 t |= clExtra1
-  , closureExtra2 t |= clExtra2
+  , closureField1 t |= clField1
+  , closureField2 t |= clField2
   , closureMeta   t |= clMeta
   ] <> case clCC of
       Nothing -> mempty
@@ -149,8 +149,8 @@ data CopyCC = CopyCC | DontCopyCC
 copyClosure :: CopyCC -> JExpr -> JExpr -> JStat
 copyClosure copy_cc t s = BlockStat
   [ closureEntry  t |= closureEntry  s
-  , closureExtra1 t |= closureExtra1 s
-  , closureExtra2 t |= closureExtra2 s
+  , closureField1 t |= closureField1 s
+  , closureField2 t |= closureField2 s
   , closureMeta   t |= closureMeta   s
   ] <> case copy_cc of
       DontCopyCC -> mempty
