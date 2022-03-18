@@ -265,6 +265,19 @@ alignIdPrimReps i = alignPrimReps (idPrimReps i)
 alignIdExprs :: Id -> [JExpr] -> [TypedExpr]
 alignIdExprs i es = fmap (uncurry TypedExpr) (alignIdPrimReps i es)
 
+-- | Return False only if we are *sure* it's a data type
+-- Look through newtypes etc as much as possible
+might_be_a_function :: HasDebugCallStack => Type -> Bool
+might_be_a_function ty
+  | [LiftedRep] <- typePrimRep ty
+  , Just tc <- tyConAppTyCon_maybe (unwrapType ty)
+  , isDataTyCon tc
+  = False
+  | otherwise
+  = True
+
+
+
 closureInfoStat :: Bool -> ClosureInfo -> JStat
 closureInfoStat debug (ClosureInfo obj rs name layout CIThunk srefs) =
     setObjInfoL debug obj rs layout Thunk name 0 srefs

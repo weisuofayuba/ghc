@@ -62,7 +62,6 @@ import GHC.Types.Id
 import GHC.Types.Id.Info
 import GHC.Types.Unique.Set
 import GHC.Types.Unique.FM
-import GHC.Types.RepType
 import GHC.Types.CostCentre
 
 import GHC.Stg.Syntax
@@ -339,18 +338,6 @@ pushCont as = do
     else push $ reverse $ app : mkTag as' as : as'
   where
     mkTag rs ns = toJExpr ((length rs `Bits.shiftL` 8) Bits..|. length ns)
-
--- | Return False only if we are *sure* it's a data type
--- Look through newtypes etc as much as possible
-might_be_a_function :: HasDebugCallStack => Type -> Bool
-might_be_a_function ty
-  | [LiftedRep] <- typePrimRep ty
-  , Just tc <- tyConAppTyCon_maybe (unwrapType ty)
-  , isDataTyCon tc
-  = False
-  | otherwise
-  = True
-
 
 rtsApply :: StgToJSConfig -> JStat
 rtsApply cfg = BlockStat $
