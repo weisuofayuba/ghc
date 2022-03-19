@@ -622,6 +622,8 @@ Library
         GHC.StgToJS.Types
         GHC.StgToJS.UnitUtils
         GHC.StgToJS.Utils
+        GHC.StgToJS.Linker
+        GHC.StgToJS.DynamicLinking
         GHC.Stg.Unarise
         GHC.SysTools
         GHC.SysTools.Ar
