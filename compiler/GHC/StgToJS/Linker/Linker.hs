@@ -31,10 +31,11 @@ import           GHC.JS.Make
 
 import qualified GHC.SysTools.Ar
 -- import qualified GHC.StgToJS.Compactor    as Compactor
+import           GHC.StgToJS.Object (ExportedFun(..))
 import qualified GHC.StgToJS.Object       as Object
 import           GHC.StgToJS.Rts.Types
 
-import           GHC.Data.ShortText           (ShortText)
+import           GHC.Data.ShortText       (ShortText)
 import qualified GHC.Data.ShortText       as T
 import           GHC.Utils.Encoding
 import           GHC.Utils.Panic
@@ -50,7 +51,10 @@ import           Control.Exception        (evaluate)
 import           Control.Monad
 
 import           Data.Array
+
 import           Data.Binary
+import qualified Data.Binary.Get as DB
+import qualified Data.Binary.Put as DB
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Function            (on)
@@ -109,11 +113,11 @@ link :: DynFlags
      -> GhcjsSettings
      -> FilePath                   -- ^ output file/directory
      -> [FilePath]                 -- ^ include path for home package
-     -> [InstalledUnitId]          -- ^ packages to link
+     -> [UnitId]          -- ^ packages to link
      -> [LinkedObj]                -- ^ the object files we're linking
      -> [FilePath]                 -- ^ extra js files to include
-     -> (Fun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
-     -> Set Fun                    -- ^ extra symbols to link in
+     -> (ExportedFun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
+     -> Set ExportedFun                    -- ^ extra symbols to link in
      -> IO ()
 link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
   | gsNoJSExecutables settings = return ()
@@ -172,16 +176,16 @@ link' :: DynFlags
       -> GhcjsSettings
       -> String                     -- ^ target (for progress message)
       -> [FilePath]                 -- ^ include path for home package
-      -> [InstalledUnitId]          -- ^ packages to link
+      -> [UnitId]          -- ^ packages to link
       -> [LinkedObj]                -- ^ the object files we're linking
       -> [FilePath]                 -- ^ extra js files to include
-      -> (Fun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
-      -> Set Fun                    -- ^ extra symbols to link in
+      -> (ExportedFun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
+      -> Set ExportedFun                    -- ^ extra symbols to link in
       -> IO LinkResult
 link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
       (objDepsMap, objRequiredUnits) <- loadObjDeps objFiles
       let rootSelector | Just baseMod <- gsGenBase settings =
-                           \(Fun _p m _s) -> m == T.pack baseMod
+                           \(ExportedFun _p m _s) -> m == T.pack baseMod
                        | otherwise = isRootFun
           roots = S.fromList . filter rootSelector $
             concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
@@ -197,13 +201,13 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
         BaseState b   -> return b
       (rdPkgs, rds) <- rtsDeps dflags pkgs
       -- c   <- newMVar M.empty
-      let rtsPkgs     =  map stringToInstalledUnitId
+      let rtsPkgs     =  map stringToUnitId
                              ["@rts", "@rts_" ++ buildTag dflags]
-          pkgs' :: [InstalledUnitId]
+          pkgs' :: [UnitId]
           pkgs'       = nub (rtsPkgs ++ rdPkgs ++ reverse objPkgs ++ reverse pkgs)
           pkgs''      = filter (not . isAlreadyLinked base) pkgs'
           -- pkgLibPaths = mkPkgLibPaths pkgs'
-          -- getPkgLibPaths :: InstalledUnitId -> ([FilePath],[String])
+          -- getPkgLibPaths :: UnitId -> ([FilePath],[String])
           -- getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
       (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
           getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
@@ -211,7 +215,7 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
       (allDeps, code) <-
         collectDeps dflags
                     (objDepsMap `M.union` archsDepsMap)
-                    (pkgs' ++ [thisInstalledUnitId dflags])
+                    (pkgs' ++ [thisUnitId dflags])
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
                     (archsRequiredUnits ++ objRequiredUnits)
@@ -227,10 +231,10 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
                  (filter (`notElem` alreadyLinkedAfter)  shimsAfter)
                  pkgArchs base'
   where
-    isAlreadyLinked :: Base -> InstalledUnitId -> Bool
+    isAlreadyLinked :: Base -> UnitId -> Bool
     isAlreadyLinked b pkg = mkPackage pkg `elem` basePkgs b
 
-    mkPkgLibPaths :: [InstalledUnitId] -> [(InstalledUnitId, ([FilePath],[String]))]
+    mkPkgLibPaths :: [UnitId] -> [(UnitId, ([FilePath],[String]))]
     mkPkgLibPaths
       = map (\k -> ( k
                    , (getInstalledPackageLibDirs dflags k
@@ -240,7 +244,7 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
 renderLinker :: GhcjsSettings
              -> DynFlags
              -> CompactorState
-             -> Set Fun
+             -> Set ExportedFun
              -> [(Package, Module, JStat, Text, [ClosureInfo], [StaticInfo], [ForeignRef])] -- ^ linked code per module
              -> (BL.ByteString, Int64, CompactorState, LinkerStats)
 renderLinker settings dflags renamerState rtsDeps code =
@@ -284,24 +288,25 @@ rtsText' debug = if debug
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` ("/\\"::String))) . splitPath
 
-getPackageArchives :: DynFlags -> [([FilePath],[String])] -> IO [FilePath]
-getPackageArchives dflags pkgs =
+getPackageArchives :: StgToJSConfig -> [([FilePath],[String])] -> IO [FilePath]
+getPackageArchives cfg pkgs =
   filterM doesFileExist [ p </> "lib" ++ l ++ profSuff <.> "a"
                         | (paths, libs) <- pkgs, p <- paths, l <- libs ]
   where
     -- XXX the profiling library name is probably wrong now
-    profSuff | WayProf `elem` ways dflags = "_p"
-             | otherwise                  = ""
+    profSuff | csProf cfg = "_p"
+             | otherwise  = ""
 
 -- fixme the wired-in package id's we get from GHC we have no version
-getShims :: DynFlags -> [FilePath] -> [InstalledUnitId] -> IO ([FilePath], [FilePath])
-getShims dflags extraFiles pkgDeps = do
-  (w,a) <- collectShims (getLibDir dflags </> "shims")
-                        (map (convertPkg dflags) pkgDeps)
-  extraFiles' <- mapM canonicalizePath extraFiles
-  return (w, a++extraFiles')
+getShims :: DynFlags -> [FilePath] -> [UnitId] -> IO ([FilePath], [FilePath])
+getShims = panic "Panic from getShims: Shims not implemented! no to shims!"
+-- getShims dflags extraFiles pkgDeps = do
+--   (w,a) <- collectShims (getLibDir dflags </> "shims")
+--                         (map (convertPkg dflags) pkgDeps)
+--   extraFiles' <- mapM canonicalizePath extraFiles
+--   return (w, a++extraFiles')
 
-convertPkg :: DynFlags -> InstalledUnitId -> (Text, Version)
+convertPkg :: DynFlags -> UnitId -> (Text, Version)
 convertPkg dflags p
   = case getInstalledPackageVersion dflags p of
       Just v -> (T.pack (getInstalledPackageName dflags p), v)
@@ -379,13 +384,13 @@ writeExterns :: FilePath -> IO ()
 writeExterns out = T.writeFile (out </> "all.js.externs") rtsExterns
 
 -- | get all functions in a module
-modFuns :: Deps -> [Fun]
+modFuns :: Deps -> [ExportedFun]
 modFuns (Deps _p _m _r e _b) = M.keys e
 
 -- | get all dependencies for a given set of roots
 getDeps :: Map (Package,Module) Deps -- ^ loaded deps
         -> Set LinkableUnit -- ^ don't link these blocks
-        -> Set Fun          -- ^ start here
+        -> Set ExportedFun          -- ^ start here
         -> [LinkableUnit]   -- ^ and also link these
         -> IO (Set LinkableUnit)
 getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun)
@@ -408,7 +413,7 @@ getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun
 
     go' :: Set LinkableUnit
         -> Set LinkableUnit
-        -> [Fun]
+        -> [ExportedFun]
         -> IO (Set LinkableUnit)
     go' result open [] = go result open
     go' result open (f:fs) =
@@ -433,9 +438,9 @@ getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun
 -- | collect dependencies for a set of roots
 collectDeps :: DynFlags
             -> Map (Package, Module) (Deps, DepsLocation)
-            -> [InstalledUnitId]     -- ^ packages, code linked in this order
+            -> [UnitId]     -- ^ packages, code linked in this order
             -> Set LinkableUnit -- ^ do not include these
-            -> Set Fun -- ^ roots
+            -> Set ExportedFun -- ^ roots
             -> [LinkableUnit] -- ^ more roots
             -> IO ( Set LinkableUnit
                   , [(Package, Module, JStat, Text, [ClosureInfo], [StaticInfo], [ForeignRef])]
@@ -443,7 +448,7 @@ collectDeps :: DynFlags
 collectDeps _dflags lookup packages base roots units = do
   allDeps <- getDeps (fmap fst lookup) base roots units
   -- read ghc-prim first, since we depend on that for static initialization
-  let packages' = uncurry (++) $ partition (==(toInstalledUnitId primUnitId)) (nub packages)
+  let packages' = uncurry (++) $ partition (==(toUnitId primUnitId)) (nub packages)
       unitsByModule :: Map (Package, Module) IntSet
       unitsByModule = M.fromListWith IS.union $
                       map (\(p,m,n) -> ((p,m),IS.singleton n)) (S.toList allDeps)
@@ -508,11 +513,11 @@ readArObject ar_state mod_name ar_file = do
                    (fmap (BL.fromStrict . Ar.filedata) (find matchTag entries))
   -- mapM_ (\e -> putStrLn ("found file: " ++ Ar.filename e)) entries
 
-mkPackage :: InstalledUnitId -> Package
+mkPackage :: UnitId -> Package
 mkPackage pk = Package (T.pack $ installedUnitIdString pk)
 
-toPackageKey :: Package -> InstalledUnitId
-toPackageKey = stringToInstalledUnitId . T.unpack . unPackage
+toPackageKey :: Package -> UnitId
+toPackageKey = stringToUnitId . T.unpack . unPackage
 
 {- | Static dependencies are symbols that need to be linked regardless
      of whether the linked program refers to them. For example
@@ -551,7 +556,7 @@ noStaticDeps = StaticDeps []
 --   parseJSON _          = mempty
 
 -- | dependencies for the RTS, these need to be always linked
-rtsDeps :: DynFlags -> [InstalledUnitId] -> IO ([InstalledUnitId], Set Fun)
+rtsDeps :: DynFlags -> [UnitId] -> IO ([UnitId], Set ExportedFun)
 rtsDeps dflags pkgs = readSystemDeps dflags pkgs
                                 "RTS"
                                 "linking"
@@ -559,18 +564,18 @@ rtsDeps dflags pkgs = readSystemDeps dflags pkgs
 
 -- | dependencies for the Template Haskell, these need to be linked when running
 --   Template Haskell (in addition to the RTS deps)
-thDeps :: DynFlags -> [InstalledUnitId] -> IO ([InstalledUnitId], Set Fun)
+thDeps :: DynFlags -> [UnitId] -> IO ([UnitId], Set ExportedFun)
 thDeps dflags pkgs = readSystemDeps dflags pkgs
                                "Template Haskell"
                                "running Template Haskell"
                                "thdeps.yaml"
 
 readSystemDeps :: DynFlags
-               -> [InstalledUnitId]
+               -> [UnitId]
                -> String
                -> String
                -> FilePath
-               -> IO ([InstalledUnitId], Set Fun)
+               -> IO ([UnitId], Set ExportedFun)
 readSystemDeps dflags pkgs depsName requiredFor file = do
   (deps_pkgs, deps_funs) <- readSystemDeps' dflags depsName requiredFor file
   pure ( filter (`S.member` linked_pkgs) deps_pkgs
@@ -586,15 +591,15 @@ readSystemDeps' :: DynFlags
                -> String
                -> String
                -> FilePath
-               -> IO ([InstalledUnitId], Set Fun)
+               -> IO ([UnitId], Set ExportedFun)
 readSystemDeps' dflags depsName requiredFor file
   -- hardcode contents to get rid of yaml dep
   -- XXX move runTHServer to some suitable wired-in package
-  | file == "thdeps.yaml" = pure ( [stringToInstalledUnitId "base"]
+  | file == "thdeps.yaml" = pure ( [stringToUnitId "base"]
                                  , S.fromList $ d "base" "GHCJS.Prim.TH.Eval" ["runTHServer"])
-  | file == "rtsdeps.yaml" = pure ( [stringToInstalledUnitId "base"
-                                    , stringToInstalledUnitId "ghc-prim"
-                                    , stringToInstalledUnitId "integer-wired-in"
+  | file == "rtsdeps.yaml" = pure ( [stringToUnitId "base"
+                                    , stringToUnitId "ghc-prim"
+                                    , stringToUnitId "integer-wired-in"
                                     ]
                                   , S.fromList $ concat
                                   [ d "base" "GHC.Conc.Sync" ["reportError"]
@@ -614,10 +619,10 @@ readSystemDeps' dflags depsName requiredFor file
                                   )
   | otherwise = pure ([], mempty)
   where
-    d pkg m syms = map (\s -> (Fun (Package $ T.pack pkg) m) (mkHaskellSym (stringToInstalledUnitId pkg) m s)) syms
+    d pkg m syms = map (\s -> (ExportedFun (Package $ T.pack pkg) m) (mkHaskellSym (stringToUnitId pkg) m s)) syms
     zenc  = T.pack . zEncodeString . T.unpack
-    mkHaskellSym :: InstalledUnitId -> Text -> Text -> Text
-    mkHaskellSym p m s = "h$" <> zenc (T.pack (encodeInstalledUnitId dflags p) <> ":" <> m <> "." <> s)
+    mkHaskellSym :: UnitId -> Text -> Text -> Text
+    mkHaskellSym p m s = "h$" <> zenc (T.pack (encodeUnitId dflags p) <> ":" <> m <> "." <> s)
 
 {-
   b  <- readBinaryFile (getLibDir dflags </> file)
@@ -638,7 +643,7 @@ readSystemDeps' dflags depsName requiredFor file
 
 -}
 
-readSystemWiredIn :: DynFlags -> IO [(Text, InstalledUnitId)]
+readSystemWiredIn :: DynFlags -> IO [(Text, UnitId)]
 readSystemWiredIn _ = pure [] -- XXX
 {-
 readSystemWiredIn dflags = do
@@ -647,12 +652,12 @@ readSystemWiredIn dflags = do
      Left _err -> error $ "could not read wired-in package keys from " ++ filename
      Right m  -> return . M.toList
                         . M.union ghcWiredIn -- GHC wired-in package keys override those in the file
-                        . fmap stringToInstalledUnitId $ m
+                        . fmap stringToUnitId $ m
   where
     filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
-    ghcWiredIn :: Map Text InstalledUnitId
+    ghcWiredIn :: Map Text UnitId
     ghcWiredIn = M.fromList $ map (\k -> (T.pack (installedUnitIdString k), k))
-                                  (map toInstalledUnitId wiredInUnitIds)
+                                  (map toUnitId wiredInUnitIds)
                                   -}
 {- | read a static dependencies specification and give the roots
 
@@ -664,9 +669,9 @@ readSystemWiredIn dflags = do
 type SDep = (Text, Text, Text)
 
 staticDeps :: DynFlags
-           -> [(Text, InstalledUnitId)]    -- ^ wired-in package names / keys
+           -> [(Text, UnitId)]    -- ^ wired-in package names / keys
            -> StaticDeps              -- ^ deps from yaml file
-           -> (StaticDeps, [InstalledUnitId], Set Fun)
+           -> (StaticDeps, [UnitId], Set ExportedFun)
                                       -- ^ the StaticDeps contains the symbols
                                       --   for which no package could be found
 staticDeps dflags wiredin sdeps = mkDeps sdeps
@@ -675,9 +680,9 @@ staticDeps dflags wiredin sdeps = mkDeps sdeps
     mkDeps (StaticDeps ds) =
       let (u, p, r) = foldl' resolveDep ([], S.empty, S.empty) ds
       in  (StaticDeps u, S.toList (closePackageDeps dflags p), r)
-    resolveDep :: ([SDep], Set InstalledUnitId, Set Fun)
+    resolveDep :: ([SDep], Set UnitId, Set ExportedFun)
                -> SDep
-               -> ([SDep], Set InstalledUnitId, Set Fun)
+               -> ([SDep], Set UnitId, Set ExportedFun)
     resolveDep (unresolved, pkgs, resolved) dep@(p, m, s) =
       case lookup p wiredin of
              Nothing -> ( dep : unresolved, pkgs, resolved)
@@ -689,21 +694,21 @@ staticDeps dflags wiredin sdeps = mkDeps sdeps
                  let k' = unitId conf
                  in  ( unresolved
                      , S.insert k' pkgs
-                     , S.insert (Fun (mkPackage k') m $ mkSymb k' m s)
+                     , S.insert (ExportedFun (mkPackage k') m $ mkSymb k' m s)
                                 resolved
                      )
-    mkSymb :: InstalledUnitId -> Text -> Text -> Text
+    mkSymb :: UnitId -> Text -> Text -> Text
     mkSymb p m s  =
-      "h$" <> zenc (T.pack (encodeInstalledUnitId dflags p) <> ":" <> m <> "." <> s)
+      "h$" <> zenc (T.pack (encodeUnitId dflags p) <> ":" <> m <> "." <> s)
 
-closePackageDeps :: DynFlags -> Set InstalledUnitId -> Set InstalledUnitId
+closePackageDeps :: DynFlags -> Set UnitId -> Set UnitId
 closePackageDeps dflags pkgs
   | S.size pkgs == S.size pkgs' = pkgs
   | otherwise                   = closePackageDeps dflags pkgs'
   where
     pkgs' = pkgs `S.union` S.fromList (concatMap deps $ S.toList pkgs)
     notFound = error "closePackageDeps: package not found"
-    deps :: InstalledUnitId -> [InstalledUnitId]
+    deps :: UnitId -> [UnitId]
     deps =
 --           map (Packages.resolveInstalledPackageId dflags)
            Packages.depends
@@ -775,3 +780,23 @@ readDepsFile' (ObjFile file)      =
 generateBase :: FilePath -> Base -> IO ()
 generateBase outDir b =
   BL.writeFile (outDir </> "out.base.symbs") (Compactor.renderBase b)
+
+{- |
+  The Base data structure contains the information we need
+  to do incremental linking against a base bundle.
+
+  base file format:
+  GHCJSBASE
+  [renamer state]
+  [linkedPackages]
+  [packages]
+  [modules]
+  [symbols]
+ -}
+
+renderBase :: Base                                   -- ^ base metadata
+           -> BL.ByteString                          -- ^ rendered result
+renderBase = DB.runPut . putBase
+
+loadBase :: FilePath -> IO Base
+loadBase file = DB.runGet (getBase file) <$> BL.readFile file

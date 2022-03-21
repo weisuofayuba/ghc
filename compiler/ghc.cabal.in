@@ -613,6 +613,7 @@ Library
         GHC.StgToJS.Object
         GHC.StgToJS.Prim
         GHC.StgToJS.Profiling
+        GHC.StgToJS.Printer
         GHC.StgToJS.Regs
         GHC.StgToJS.Rts.Types
         GHC.StgToJS.Rts.Rts
@@ -622,8 +623,9 @@ Library
         GHC.StgToJS.Types
         GHC.StgToJS.UnitUtils
         GHC.StgToJS.Utils
-        GHC.StgToJS.Linker
-        GHC.StgToJS.DynamicLinking
+        GHC.StgToJS.Linker.Linker
+        GHC.StgToJS.Linker.DynamicLinking
+        GHC.StgToJS.Linker.Compactor
         GHC.Stg.Unarise
         GHC.SysTools
         GHC.SysTools.Ar
