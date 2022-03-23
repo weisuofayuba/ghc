@@ -358,6 +358,11 @@ Compiler
         sameByteArray# :: ByteArray# -> ByteArray# -> Int#
         sameArrayArray# :: ArrayArray# -> ArrayArray# -> Int#
 
+Compiler
+~~~~~~~~
+
+- Added first class C++ support to the compiler driver.
+
 ``ghc`` library
 ~~~~~~~~~~~~~~~
 
