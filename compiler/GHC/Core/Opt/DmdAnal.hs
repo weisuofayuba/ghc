@@ -31,7 +31,7 @@ import GHC.Types.Id
 import GHC.Core.Utils
 import GHC.Core.TyCon
 import GHC.Core.Type
-import GHC.Core.Predicate ( isClassPred )
+import GHC.Core.Predicate( isClassPred )
 import GHC.Core.FVs      ( rulesRhsFreeIds, bndrRuleAndUnfoldingIds )
 import GHC.Core.Coercion ( Coercion )
 import GHC.Core.TyCo.FVs ( coVarsOfCos )
@@ -283,7 +283,7 @@ dmdAnalBindLetUp top_lvl env id rhs anal_body = WithDmdType final_ty (R (NonRec 
     WithDmdType body_ty' id_dmd = findBndrDmd env body_ty id
     -- See Note [Finalising boxity for demand signatures]
 
-    id_dmd'            = finaliseLetBoxity (ae_fam_envs env) (idType id) id_dmd
+    id_dmd'            = finaliseLetBoxity env (idType id) id_dmd
     !id'               = setBindIdDemandInfo top_lvl id id_dmd'
     (rhs_ty, rhs')     = dmdAnalStar env id_dmd' rhs
 
@@ -961,7 +961,6 @@ dmdAnalRhsSig top_lvl rec_flag env let_dmd id rhs
 
     WithDmdType rhs_dmd_ty rhs' = dmdAnal env rhs_dmd rhs
     DmdType rhs_fv rhs_dmds rhs_div = rhs_dmd_ty
-    -- See Note [Do not unbox class dictionaries]
     -- See Note [Boxity for bottoming functions]
     (final_rhs_dmds, final_rhs) = finaliseArgBoxities env id rhs_arity rhs' rhs_div
                                   `orElse` (rhs_dmds, rhs')
@@ -1269,7 +1268,7 @@ wrapper for `indexError` *will* unbox `p`). This pattern often occurs in
 performance sensitive code that does bounds-checking.
 
 It would be a shame to let `Boxed` win for the fields! So here's what we do:
-While to summarising `indexError`'s boxity signature in `finaliseArgBoxities`,
+While summarising `indexError`'s boxity signature in `finaliseArgBoxities`,
 we `unboxDeeplyDmd` all its argument demands and are careful not to discard
 excess boxity in the `StopUnboxing` case, to get the signature
 `<1!P(!S,!S)><1!S><S!S>b`.
@@ -1336,11 +1335,11 @@ Here is a list of different Notes it has to take care of:
   * Note [No lazy, Unboxed demands in demand signature] such as `L!P(L)` in
     general, but still allow Note [Unboxing evaluated arguments]
   * Note [No nested Unboxed inside Boxed in demand signature] such as `1P(1!L)`
-  * Implement fixes for corner cases Note [Do not unbox class dictionaries]
-    and Note [mkWWstr and unsafeCoerce]
+  * Note [mkWWstr and unsafeCoerce]
 
-Then, in worker/wrapper blindly trusts the boxity info in the demand signature
-and will not look at strictness info *at all*, in 'wantToUnboxArg'.
+NB: Then, the worker/wrapper blindly trusts the boxity info in the
+demand signature; that is why 'canUnboxArg' does not look at
+strictness -- it is redundant to do so.
 
 Note [Finalising boxity for let-bound Ids]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1442,7 +1441,7 @@ So here's what we do
   'finaliseArgBoxities' when deciding whether to unbox 'a'. 'a' was used lazily, but
   since it also says 'MarkedStrict', we'll retain the 'Unboxed' boxity on 'a'.
 
-* Worker/wrapper will consult 'wantToUnboxArg' for its unboxing decision. It will
+* Worker/wrapper will consult 'canUnboxArg' for its unboxing decision. It will
   /not/ look at the strictness bits of the demand, only at Boxity flags. As such,
   it will happily unbox 'a' despite the lazy demand on it.
 
@@ -1523,30 +1522,32 @@ the case on `x` up through the case on `burble`.
 
 Note [Do not unbox class dictionaries]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-If we have
-   f :: Ord a => [a] -> Int -> a
-   {-# INLINABLE f #-}
-and we worker/wrapper f, we'll get a worker with an INLINABLE pragma
-(see Note [Worker/wrapper for INLINABLE functions] in GHC.Core.Opt.WorkWrap),
-which can still be specialised by the type-class specialiser, something like
-   fw :: Ord a => [a] -> Int# -> a
+We never unbox class dictionaries in worker/wrapper.
 
-BUT if f is strict in the Ord dictionary, we might unpack it, to get
-   fw :: (a->a->Bool) -> [a] -> Int# -> a
-and the type-class specialiser can't specialise that. An example is #6056.
+1. INLINABLE functions
+   If we have
+      f :: Ord a => [a] -> Int -> a
+      {-# INLINABLE f #-}
+   and we worker/wrapper f, we'll get a worker with an INLINABLE pragma
+   (see Note [Worker/wrapper for INLINABLE functions] in GHC.Core.Opt.WorkWrap),
+   which can still be specialised by the type-class specialiser, something like
+      fw :: Ord a => [a] -> Int# -> a
 
-But in any other situation, a dictionary is just an ordinary value,
-and can be unpacked.  So we track the INLINABLE pragma, and discard the boxity
-flag in finaliseArgBoxities (see the isClassPred test).
+   BUT if f is strict in the Ord dictionary, we might unpack it, to get
+      fw :: (a->a->Bool) -> [a] -> Int# -> a
+   and the type-class specialiser can't specialise that. An example is #6056.
 
-Historical note: #14955 describes how I got this fix wrong the first time.
+   Historical note: #14955 describes how I got this fix wrong the first time.
+   I got aware of the issue in T5075 by the change in boxity of loop between
+   demand analysis runs.
 
-Note that the simplicity of this fix implies that INLINE functions (such as
-wrapper functions after the WW run) will never say that they unbox class
-dictionaries. That's not ideal, but not worth losing sleep over, as INLINE
-functions will have been inlined by the time we run demand analysis so we'll
-see the unboxing around the worker in client modules. I got aware of the issue
-in T5075 by the change in boxity of loop between demand analysis runs.
+2. -fspecialise-aggressively.  As #21286 shows, the same phenomenon can occur
+   occur without INLINABLE, when we use -fexpose-all-unfoldings and
+   -fspecialise-aggressively to do vigorous cross-module specialisation.
+
+TL;DR we /never/ unbox class dictionaries. Unboxing the dictionary, and passing
+a raft of higher-order functions isn't a huge win anyway -- you really want to
+specialise the function.
 
 Note [Worker argument budget]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1608,8 +1609,6 @@ finaliseArgBoxities env fn arity rhs div
     -- uses the info on the binders directly.
   where
     opts            = ae_opts env
-    fam_envs        = ae_fam_envs env
-    is_inlinable_fn = isStableUnfolding (realIdUnfolding fn)
     (bndrs, _body)  = collectBinders rhs
     max_wkr_args    = dmd_max_worker_args opts `max` arity
                       -- See Note [Worker argument budget]
@@ -1625,54 +1624,53 @@ finaliseArgBoxities env fn arity rhs div
                   filter isRuntimeVar bndrs
 
     mk_triple :: Id -> (Type,StrictnessMark,Demand)
-    mk_triple bndr | is_cls_arg ty = (ty, NotMarkedStrict, trimBoxity dmd)
-                   | is_bot_fn     = (ty, NotMarkedStrict, unboxDeeplyDmd dmd)
-                   -- See Note [OPAQUE pragma]
-                   -- See Note [The OPAQUE pragma and avoiding the reboxing of arguments]
-                   | is_opaque     = (ty, NotMarkedStrict, trimBoxity dmd)
-                   | otherwise     = (ty, NotMarkedStrict, dmd)
-                   where
-                     ty        = idType bndr
-                     dmd       = idDemandInfo bndr
-                     is_opaque = isOpaquePragma (idInlinePragma fn)
+    mk_triple bndr
+      | isClassPred ty = (ty, NotMarkedStrict, trimBoxity dmd)
+        -- Never unbox class dictionaries
+        -- See Note [Do not unbox class dictionaries]
+        -- NB: 'ty' has not been normalised, so this will (rightly)
+        --     catch newtype dictionaries too.
+        -- NB: even for bottoming functions, don't unbox dictionaries
 
-    -- is_cls_arg: see Note [Do not unbox class dictionaries]
-    is_cls_arg arg_ty = is_inlinable_fn && isClassPred arg_ty
+      | is_bot_fn = (ty, NotMarkedStrict, unboxDeeplyDmd dmd)
+        -- See Note [Boxity for bottoming functions]
+
+      | is_opaque = (ty, NotMarkedStrict, trimBoxity dmd)
+        -- See Note [OPAQUE pragma]
+        -- See Note [The OPAQUE pragma and avoiding the reboxing of arguments]
+
+      | otherwise = (ty, NotMarkedStrict, dmd)
+      where
+        ty        = idType bndr
+        dmd       = idDemandInfo bndr
+        is_opaque = isOpaquePragma (idInlinePragma fn)
+
     -- is_bot_fn:  see Note [Boxity for bottoming functions]
-    is_bot_fn         = div == botDiv
+    is_bot_fn = div == botDiv
 
     go_args :: Budgets -> [(Type,StrictnessMark,Demand)] -> (Budgets, [Demand])
     go_args bg triples = mapAccumL go_arg bg triples
 
     go_arg :: Budgets -> (Type,StrictnessMark,Demand) -> (Budgets, Demand)
     go_arg bg@(MkB bg_top bg_inner) (ty, str_mark, dmd@(n :* _))
-      = case wantToUnboxArg False fam_envs ty dmd of
+      = case wantToUnboxArg env ty str_mark dmd of
           StopUnboxing
             | not is_bot_fn
                 -- If bot: Keep deep boxity even though WW won't unbox
                 -- See Note [Boxity for bottoming functions]
+                -- trimBoxity: see Note [No lazy, Unboxed demands in demand signature]
             -> (MkB (bg_top-1) bg_inner, trimBoxity dmd)
 
-          Unbox DataConPatContext{dcpc_dc=dc, dcpc_tc_args=tc_args} dmds
+          Unbox triples
             -> (MkB (bg_top-1) final_bg_inner, final_dmd)
             where
-              dc_arity = dataConRepArity dc
-              arg_tys  = dubiousDataConInstArgTys dc tc_args
-              (bg_inner', dmds') = go_args (incTopBudget bg_inner) $
-                                   zip3 arg_tys (dataConRepStrictness dc) dmds
+              (bg_inner', dmds') = go_args (incTopBudget bg_inner) triples
               dmd' = n :* (mkProd Unboxed $! dmds')
               (final_bg_inner, final_dmd)
-                  | dmds `lengthIs` dc_arity
-                  , isStrict n || isMarkedStrict str_mark
-                     -- isStrict: see Note [No lazy, Unboxed demands in demand signature]
-                     -- isMarkedStrict: see Note [Unboxing evaluated arguments]
-                  , positiveTopBudget bg_inner'
-                  , NonRecursiveOrUnsure <- ae_rec_dc env dc
-                     -- See Note [Which types are unboxed?]
-                     -- and Note [Demand analysis for recursive data constructors]
-                  = (bg_inner', dmd')
-                  | otherwise
-                  = (bg_inner, trimBoxity dmd)
+                 | positiveTopBudget bg_inner' = (bg_inner', dmd')
+                 | otherwise                   = (bg_inner,  trimBoxity dmd)
+
+
           _ -> (bg, dmd)
 
     add_demands :: [Demand] -> CoreExpr -> CoreExpr
@@ -1684,7 +1682,7 @@ finaliseArgBoxities env fn arity rhs div
     add_demands dmds e = pprPanic "add_demands" (ppr dmds $$ ppr e)
 
 finaliseLetBoxity
-  :: FamInstEnvs
+  :: AnalEnv
   -> Type                   -- ^ Type of the let-bound Id
   -> Demand                 -- ^ How the Id is used
   -> Demand
@@ -1693,21 +1691,36 @@ finaliseLetBoxity
 -- it has no "budget".  It simply unboxes strict demands, and stops
 -- when it reaches a lazy one.
 finaliseLetBoxity env ty dmd
-  = go ty NotMarkedStrict dmd
+  = go (ty, NotMarkedStrict, dmd)
   where
-    go ty mark dmd@(n :* _) =
-      case wantToUnboxArg False env ty dmd of
-        DropAbsent   -> dmd
-        StopUnboxing -> trimBoxity dmd
-        Unbox DataConPatContext{dcpc_dc=dc, dcpc_tc_args=tc_args} dmds
-          | isStrict n || isMarkedStrict mark
-          , dmds `lengthIs` dataConRepArity dc
-          , let arg_tys = dubiousDataConInstArgTys dc tc_args
-                dmds'   = strictZipWith3 go arg_tys (dataConRepStrictness dc) dmds
-          -> n :* (mkProd Unboxed $! dmds')
-          | otherwise
-          -> trimBoxity dmd
-        Unlift -> panic "No unlifting in DmdAnal"
+    go :: (Type,StrictnessMark,Demand) -> Demand
+    go (ty, str, dmd@(n :* _)) =
+      case wantToUnboxArg env ty str dmd of
+        DropAbsent    -> dmd
+        StopUnboxing  -> trimBoxity dmd
+        Unbox triples -> n :* (mkProd Unboxed $! map go triples)
+        Unlift        -> panic "No unlifting in DmdAnal"
+
+
+wantToUnboxArg :: AnalEnv -> Type -> StrictnessMark -> Demand
+            -> UnboxingDecision [(Type, StrictnessMark, Demand)]
+wantToUnboxArg env ty str_mark dmd
+  = case canUnboxArg False (ae_fam_envs env) ty str_mark dmd of
+      Unbox (DataConPatContext{ dcpc_dc=dc
+                              , dcpc_tc_args=tc_args
+                              , dcpc_args = dmds })
+       | NonRecursiveOrUnsure <- ae_rec_dc env dc
+         -- See Note [Which types are unboxed?]
+         -- and Note [Demand analysis for recursive data constructors]
+       -> Unbox (zip3 (dubiousDataConInstArgTys dc tc_args)
+                      (dataConRepStrictness dc)
+                      dmds)
+       | otherwise
+       -> StopUnboxing
+
+      StopUnboxing -> StopUnboxing
+      DropAbsent   -> DropAbsent
+      Unlift       -> panic "No unlifting in DmdAnal"
 
 
 {- *********************************************************************

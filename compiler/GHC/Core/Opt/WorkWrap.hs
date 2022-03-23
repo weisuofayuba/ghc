@@ -18,6 +18,7 @@ import GHC.Core.Type
 import GHC.Core.Opt.WorkWrap.Utils
 import GHC.Core.FamInstEnv
 import GHC.Core.SimpleOpt
+import GHC.Core.DataCon( StrictnessMark(..) )
 
 import GHC.Types.Var
 import GHC.Types.Id
@@ -1034,7 +1035,7 @@ splitThunk ww_opts is_rec x rhs
   = assert (not (isJoinId x)) $
     do { let x' = localiseId x -- See comment above
        ; (useful,_args, wrap_fn, fn_arg)
-           <- mkWWstr_one ww_opts x' NotMarkedCbv
+           <- mkWWstr_one ww_opts x' NotMarkedStrict
        ; let res = [ (x, Let (NonRec x' rhs) (wrap_fn fn_arg)) ]
        ; if useful then assertPpr (isNonRec is_rec) (ppr x) -- The thunk must be non-recursive
                    return res

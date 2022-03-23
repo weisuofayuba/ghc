@@ -775,16 +775,19 @@ spec_import top_env callers rb dict_binds cis@(CIS fn _)
        -- See Note [Avoiding loops in specImports]
 
 canSpecImport :: DynFlags -> Id -> Maybe CoreExpr
--- See Note [Specialise imported INLINABLE things]
 canSpecImport dflags fn
   | isDataConWrapId fn
   = Nothing   -- Don't specialise data-con wrappers, even if they
               -- have dict args; there is no benefit.
 
-  | CoreUnfolding { uf_src = src, uf_tmpl = rhs } <- unf
-  , isStableSource src
-  = Just rhs   -- By default, specialise only imported things that have a stable
-               -- unfolding; that is, have an INLINE or INLINABLE pragma
+  | CoreUnfolding { uf_tmpl = rhs } <- unf
+  , isAnyInlinePragma (idInlinePragma fn)
+  = Just rhs   -- By default, specialise only imported things that have a /user-supplied/
+               -- INLINE or INLINABLE pragma (hence looking at the pragma rather than
+               -- isStableSource).  We don't want to specialise workers created by
+               -- worker/wrapper (for functions with no pragma) because won't specialise
+               -- usefully.
+               --
                -- Specialise even INLINE things; it hasn't inlined yet,
                -- so perhaps it never will.  Moreover it may have calls
                -- inside it that we want to specialise
@@ -794,8 +797,13 @@ canSpecImport dflags fn
     -- See Note [Do not specialise imported DFuns]
 
   | gopt Opt_SpecialiseAggressively dflags
-  = maybeUnfoldingTemplate unf  -- With -fspecialise-aggressively, specialise anything
-                                -- with an unfolding, stable or not, DFun or not
+  = maybeUnfoldingTemplate unf
+    -- With -fspecialise-aggressively, specialise anything
+    -- with an unfolding, stable or not, DFun or not
+    -- The -fspecialise-aggressively flag is usually off, because we
+    -- risk lots of orphan modules from over-vigorous specialisation.
+    -- However it's not a big deal: anything non-recursive with an
+    -- unfolding-template will probably have been inlined already.
 
   | otherwise = Nothing
   where
@@ -1031,20 +1039,6 @@ recursive yet-more-specialised call, so we'd diverge in that case.
 And if the call is to the same type, one specialisation is enough.
 Avoiding this recursive specialisation loop is one reason for the
 'callers' stack passed to specImports and specImport.
-
-Note [Specialise imported INLINABLE things]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-What imported functions do we specialise?  The basic set is
- * DFuns and things with INLINABLE pragmas.
-but with -fspecialise-aggressively we add
- * Anything with an unfolding template
-
-#8874 has a good example of why we want to auto-specialise DFuns.
-
-We have the -fspecialise-aggressively flag (usually off), because we
-risk lots of orphan modules from over-vigorous specialisation.
-However it's not a big deal: anything non-recursive with an
-unfolding-template will probably have been inlined already.
 
 Note [Glom the bindings if imported functions are specialised]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
