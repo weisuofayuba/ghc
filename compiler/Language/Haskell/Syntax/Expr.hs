@@ -1642,8 +1642,8 @@ data ArithSeqInfo id
 
 -- | Haskell Match Context
 --
--- Context of a pattern match. This is more subtle than it would seem. See Note
--- [Varieties of pattern matches].
+-- Context of a pattern match. This is more subtle than it would seem. See
+-- Note [FunBind vs PatBind].
 data HsMatchContext p
   = FunRhs { mc_fun        :: LIdP p    -- ^ function binder of @f@
            , mc_fixity     :: LexicalFixity -- ^ fixing of @f@
