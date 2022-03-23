@@ -48,6 +48,8 @@ module GHC.JS.Syntax
   , pseudoSaturate
   -- * Utility
   , SaneDouble(..)
+  -- * Keywords
+  , isJsKeyword
   ) where
 
 import GHC.Prelude
@@ -56,6 +58,7 @@ import Control.DeepSeq
 
 import Data.Function
 import qualified Data.Map as M
+import qualified Data.Set as Set
 import Data.Data
 import Data.Word
 import qualified Data.Semigroup as Semigroup
@@ -325,3 +328,26 @@ instance Show SaneDouble where
 newtype Ident = TxtI { itxt:: ShortText}
  deriving (Show, Typeable, Ord, Eq, Generic, NFData)
 
+
+--------------------------------------------------------------------------------
+--                            JS Keywords
+--------------------------------------------------------------------------------
+-- | The set of Javascript keywords
+jsKeywords :: Set.Set Ident
+jsKeywords = Set.fromList $ TxtI <$>
+           [ "break", "case", "catch", "continue", "debugger"
+           , "default", "delete", "do", "else", "finally", "for"
+           , "function", "if", "in", "instanceof", "new", "return"
+           , "switch", "this", "throw", "try", "typeof", "var", "void"
+           , "while", "with"
+           , "class", "enum", "export", "extends", "import", "super"
+           , "const"
+           , "implements", "interface", "let", "package", "private"
+           , "protected"
+           , "public", "static", "yield"
+           , "null", "true", "false"
+           ]
+
+-- | Check if provided Ident is a JS keyword
+isJsKeyword :: Ident -> Bool
+isJsKeyword = flip Set.member jsKeywords
