@@ -209,17 +209,17 @@ data Base = Base { baseCompactorState :: CompactorState
 emptyBase :: Base
 emptyBase = Base emptyCompactorState [] S.empty
 
-putBase :: Base -> PutS
+putBase :: Base -> DB.Put
 putBase (Base cs packages funs) = do
   DB.putByteString "GHCJSBASE"
-  DB.putLazyByteString Object.versionTag
+  DB.putLazyByteString versionTag
   putCs cs
   putList DB.put packages
   putList putPkg pkgs
   putList DB.put mods
   putList putFun (S.toList funs)
   where
-    pi :: Int -> PutS
+    pi :: Int -> DB.Put
     pi = DB.putWord32le . fromIntegral
     uniq :: Ord a => [a] -> [a]
     uniq  = S.toList . S.fromList
@@ -278,8 +278,8 @@ getBase file = getBase'
       hdr <- DB.getByteString 9
       when (hdr /= "GHCJSBASE")
            (panic $ "getBase: invalid base file: " <> file)
-      vt  <- DB.getLazyByteString (fromIntegral Object.versionTagLength)
-      when (vt /= Object.versionTag)
+      vt  <- DB.getLazyByteString (fromIntegral versionTagLength)
+      when (vt /= versionTag)
            (panic $ "getBase: incorrect version: " <> file)
       cs <- makeCompactorParent <$> getCs
       linkedPackages <- getList DB.get

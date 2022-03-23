@@ -9,24 +9,45 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
--- | Serialization/deserialization of binary .o files for the JavaScript backend
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  GHC.StgToJS.Object
+-- Copyright   :  (c) The University of Glasgow 2001
+-- License     :  BSD-style (see the file LICENSE)
 --
--- The .o files contain dependency information and generated code.
+-- Maintainer  :  Sylvain Henry  <sylvain.henry@iohk.io>
+--                Jeffrey Young  <jeffrey.young@iohk.io>
+--                Luite Stegeman <luite.stegeman@iohk.io>
+-- Stability   :  experimental
 --
--- All strings are mapped to a central string table, which helps reduce
--- file size and gives us efficient hash consing on read
+--  Serialization/deserialization of binary .o files for the JavaScript backend
+--  The .o files contain dependency information and generated code.
+--  All strings are mapped to a central string table, which helps reduce
+--  file size and gives us efficient hash consing on read
 --
--- Binary intermediate JavaScript object files:
---  serialized [Text] -> ([ClosureInfo], JStat) blocks
+--  Binary intermediate JavaScript object files:
+--   serialized [Text] -> ([ClosureInfo], JStat) blocks
 --
--- file layout:
---  - header ["GHCJSOBJ", length of symbol table, length of dependencies, length of index]
---  - compiler version tag
---  - symbol table
---  - dependency info
---  - closureinfo index
---  - closureinfo data (offsets described by index)
---
+--  file layout:
+--   - header ["GHCJSOBJ", length of symbol table, length of dependencies, length of index]
+--   - compiler version tag
+--   - symbol table
+
+--   - dependency info
+--   - closureinfo index
+--   - closureinfo data (offsets described by index)
+
+-- FIXME: Jeff (2022,03): Theare orphan instances for DB.Binary Module and
+-- ModuleName. These are needed in StgToJS.Linker.Types for @Base@ serialization
+-- in @putBase@. We end up in this situation because Base now holds a @Module@
+-- type instead of GHCJS's previous @Package@ type. In addition to this GHC uses
+-- GHC.Utils.Binary for binary instances rather than Data.Binary (even though
+-- Data.Binary is a boot lib) so to fix the situation we must:
+-- - 1. Choose to use GHC.Utils.Binary or Data.Binary
+-- - 2. Remove Objectable since this is redundant
+-- - 3. Adapt the Linker types, like Base to the new Binary methods
+-----------------------------------------------------------------------------
+
 module GHC.StgToJS.Object
   ( object
   , object'
@@ -47,6 +68,10 @@ module GHC.StgToJS.Object
   , Header(..), getHeader, moduleNameTag
   , SymbolTable
   , ObjUnit (..)
+  -- FIXME: Jeff (2022,03): These exports are just for Base use in Linker.Types
+  , Objectable(..)
+  , PutS
+  -- end exports for Linker.Types
   , Deps (..), BlockDeps (..)
   , ExpFun (..), ExportedFun (..)
   , versionTag, versionTagLength
@@ -736,6 +761,24 @@ instance Objectable Module where
   put (Module unit mod_name) = put unit >> put mod_name
   get = Module <$> get <*> get
 
+instance DB.Binary Module where
+  put (Module unit mod_name) = DB.put unit >> DB.put mod_name
+  get = Module <$> DB.get <*> DB.get
+
+instance DB.Binary ModuleName where
+  put (ModuleName fs) = DB.put fs
+  get = ModuleName <$> DB.get
+
+instance DB.Binary Unit where
+  put = \case
+    RealUnit (Definite uid) -> DB.put (0 :: Int) >> DB.put uid
+    VirtUnit uid            -> DB.put 1          >> DB.put uid
+    HoleUnit                -> DB.put 2
+  get = DB.get >>= \case
+    (0 :: Int) -> (RealUnit . Definite) <$> DB.get
+    1          -> VirtUnit              <$> DB.get
+    _          -> pure HoleUnit
+
 instance Objectable ModuleName where
   put (ModuleName fs) = put fs
   get = ModuleName <$> get
@@ -753,6 +796,10 @@ instance Objectable Unit where
 instance Objectable FastString where
   put fs = put (unpackFS fs)
   get = mkFastString <$> get
+
+instance DB.Binary FastString where
+  put fs = DB.put (unpackFS fs)
+  get = mkFastString <$> DB.get
 
 instance Objectable UnitId where
   put (UnitId fs) = put fs

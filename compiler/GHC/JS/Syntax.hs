@@ -59,8 +59,8 @@ import Control.DeepSeq
 import Data.Function
 import qualified Data.Map as M
 import qualified Data.Set as Set
+import Data.Binary
 import Data.Data
-import Data.Word
 import qualified Data.Semigroup as Semigroup
 
 import GHC.Generics
@@ -322,11 +322,12 @@ instance Show SaneDouble where
 --------------------------------------------------------------------------------
 --                            Identifiers
 --------------------------------------------------------------------------------
--- We use ShortText for identifier in JS backend
+-- We use ShortText for identifiers in JS backend
 
 -- | Identifiers
 newtype Ident = TxtI { itxt:: ShortText}
- deriving (Show, Typeable, Ord, Eq, Generic, NFData)
+ deriving stock (Show, Typeable, Ord, Eq, Generic)
+ deriving newtype (Binary, NFData)
 
 
 --------------------------------------------------------------------------------
