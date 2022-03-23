@@ -128,8 +128,10 @@ initSettings top_dir = do
   cc_link_args_str <- getSetting "C compiler link flags"
   let   as_prog  = cc_prog
         as_args  = map Option cc_args
-        ld_prog  = cc_prog
-        ld_args  = map Option (cc_args ++ words cc_link_args_str)
+        -- Use C++ compiler to link as we may be linking against objects
+        -- which depend upon the C++ standard library.
+        ld_prog  = cxx_prog
+        ld_args  = map Option (cxx_args ++ words cc_link_args_str)
   ld_r_prog <- getToolSetting "Merge objects command"
   ld_r_args <- getSetting "Merge objects flags"
   let ld_r

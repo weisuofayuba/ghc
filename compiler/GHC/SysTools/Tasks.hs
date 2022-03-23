@@ -173,7 +173,7 @@ askLd logger dflags args = traceToolCommand logger "linker" $ do
       args1     = map Option (getOpts dflags opt_l)
       args2     = args0 ++ args1 ++ args
   mb_env <- getGccEnv args2
-  runSomethingWith logger "gcc" p args2 $ \real_args ->
+  runSomethingWith logger "linker" p args2 $ \real_args ->
     readCreateProcessWithExitCode' (proc p real_args){ env = mb_env }
 
 runAs :: Logger -> DynFlags -> [Option] -> IO ()
