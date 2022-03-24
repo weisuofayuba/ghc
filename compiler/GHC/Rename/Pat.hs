@@ -23,7 +23,7 @@ general, all of these functions return a renamed thing, and a set of
 free variables.
 -}
 module GHC.Rename.Pat (-- main entry points
-              rnPat, rnPats, rnBindPat, rnPatAndThen,
+              rnPat, rnPats, rnBindPat,
 
               NameMaker, applyNameMaker,     -- a utility for making names:
               localRecNameMaker, topRecNameMaker,  --   sometimes we want to make local names,
@@ -610,18 +610,22 @@ rnPatAndThen mk (SumPat _ pat alt arity)
        ; return (SumPat noExtField pat alt arity)
        }
 
+-- ROMES:TODO: Delete comment
 -- This only used to happen because of the recursive call on the Left case in
 -- the function body of the next pattern matched
 -- If a splice has been run already, just rename the result.
 -- rnPatAndThen mk (SplicePat x (XSplice (mfs, HsSplicedPat pat))
 --   = SplicePat x . HsSpliced x2 mfs . HsSplicedPat <$> rnPatAndThen mk pat
 
-rnPatAndThen mk (SplicePat ext splice)
+rnPatAndThen mk (SplicePat _ splice)
   = do { eith <- liftCpsFV $ rnSplicePat splice
        ; case eith of   -- See Note [rnSplicePat] in GHC.Rename.Splice -- ROMES:TODO: rewrite note
-           Left  (mfs, pat) ->
-               SplicePat ext . XSplice . (mfs,) . HsSplicedPat <$> rnPatAndThen mk pat
-           Right already_renamed -> return (SplicePat noExtField already_renamed) }
+           Left  (rn_splice, HsUntypedSpliceTop mfs pat) -> -- Splice was top-level and thus run, creating Pat GhcPs
+               flip SplicePat rn_splice . HsUntypedSpliceTop mfs <$> rnPatAndThen mk pat
+           Left  (_, HsUntypedSpliceNested _) -> undefined
+               -- ROMES:TODO: discussion!!
+           Right already_renamed -> return already_renamed  -- Splice was nested and thus already renamed
+       }
 
 --------------------
 rnConPatAndThen :: NameMaker

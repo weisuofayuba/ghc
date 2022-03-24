@@ -6,9 +6,10 @@ import GHC.Tc.Utils.Monad
 import GHC.Types.Name.Set
 
 
-rnSpliceType :: HsSplice GhcPs   -> RnM (HsType GhcRn, FreeVars)
-rnSplicePat  :: HsSplice GhcPs   -> RnM ( Either (ThModFinalizers, Pat GhcPs) (HsSplice GhcRn)
-                                        , FreeVars)
+rnSpliceType :: HsUntypedSplice GhcPs -> RnM (HsType GhcRn, FreeVars)
+rnSplicePat  :: HsUntypedSplice GhcPs -> RnM (Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult a (Pat GhcPs))
+                                                     (Pat GhcRn)
+                                            , FreeVars)
 rnSpliceDecl :: SpliceDecl GhcPs -> RnM (SpliceDecl GhcRn, FreeVars)
 
-rnTopSpliceDecls :: HsSplice GhcPs -> RnM ([LHsDecl GhcPs], FreeVars)
+rnTopSpliceDecls :: HsUntypedSplice GhcPs -> RnM ([LHsDecl GhcPs], FreeVars)

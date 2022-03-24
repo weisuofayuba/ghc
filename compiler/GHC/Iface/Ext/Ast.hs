@@ -798,7 +798,7 @@ class ( HiePass (NoGhcTcPass p)
       , Data (AmbiguousFieldOcc (GhcPass p))
       , Data (HsCmdTop (GhcPass p))
       , Data (GRHS (GhcPass p) (LocatedA (HsCmd (GhcPass p))))
-      , Data (HsSplice (GhcPass p))
+      , Data (HsUntypedSplice (GhcPass p))
       , Data (HsLocalBinds (GhcPass p))
       , Data (FieldOcc (GhcPass p))
       , Data (HsTupArg (GhcPass p))
@@ -1203,7 +1203,10 @@ instance HiePass p => ToHie (LocatedA (HsExpr (GhcPass p))) where
           [ toHie b
           , toHie p
           ]
-      HsSpliceE _ x ->
+      HsTypedSplice _ x ->
+        [ toHie $ L mspan (unLoc x)
+        ]
+      HsUntypedSplice _ x ->
         [ toHie $ L mspan x
         ]
       HsGetField {} -> []
@@ -1895,21 +1898,15 @@ instance ToHie (LBooleanFormula (LocatedN Name)) where
 instance ToHie (LocatedAn NoEpAnns HsIPName) where
   toHie (L span e) = makeNodeA e span
 
-instance HiePass p => ToHie (LocatedA (HsSplice (GhcPass p))) where
+instance HiePass p => ToHie (LocatedA (HsUntypedSplice (GhcPass p))) where
   toHie (L span sp) = concatM $ makeNodeA sp span : case sp of
-      HsTypedSplice _ _ expr ->
+      HsUntypedSpliceExpr _ expr ->
         [ toHie expr
         ]
-      HsUntypedSplice _ _ expr ->
-        [ toHie expr
+      HsQuasiQuote _ ispanFs ->
+        [ locOnly (getLocA ispanFs)
         ]
-      HsQuasiQuote _ ispan _ ->
-        [ locOnly ispan
-        ]
-      XSplice x -> case hiePass @p of
-                     HieRn | (_, _) <- x -> []
-                     HieTc -> case x of
-                                HsSplicedT _ -> []
+      XUntypedSplice _ -> undefined -- ROMES:TODO: (this is the allowed noExtField)
 
 instance ToHie (LocatedA (RoleAnnotDecl GhcRn)) where
   toHie (L span annot) = concatM $ makeNodeA annot span : case annot of

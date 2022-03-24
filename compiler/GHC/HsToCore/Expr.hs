@@ -748,7 +748,8 @@ Thus, we pass @r@ as the scrutinee expression to @matchWrapper@ above.
 
 dsExpr (HsTypedBracket   (HsBracketTc q _ hs_wrapper ps) _) = dsBracket hs_wrapper q ps
 dsExpr (HsUntypedBracket (HsBracketTc q _ hs_wrapper ps) _) = dsBracket hs_wrapper q ps
-dsExpr (HsSpliceE _ s) = pprPanic "dsExpr:splice" (ppr s)
+dsExpr (HsTypedSplice   _ s) = pprPanic "dsExpr:typed splice" (ppr s) -- ROMES:TODO: Refactor ppr typed splice
+dsExpr (HsUntypedSplice _ s) = pprPanic "dsExpr:untyped splice" (ppr s)
 
 -- Arrow notation extension
 dsExpr (HsProc _ pat cmd) = dsProcExpr pat cmd

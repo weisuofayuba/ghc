@@ -688,11 +688,11 @@ AST is used for the subtraction operation.
 -- Here we get rid of it and add the finalizers to the global environment.
 --
 -- See Note [Delaying modFinalizers in untyped splices] in GHC.Rename.Splice.
-  SplicePat _ splice -> case splice of
-    (XSplice (mod_finalizers, HsSplicedPat pat)) -> do
+  SplicePat (HsUntypedSpliceTop mod_finalizers pat) _ -> do
       { addModFinalizersWithLclEnv mod_finalizers
       ; tc_pat pat_ty penv pat thing_inside }
-    _ -> panic "invalid splice in splice pat"
+
+  SplicePat (HsUntypedSpliceNested _) _ -> undefined -- ROMES:TODO:
 
   XPat (HsPatExpanded lpat rpat) -> do
     { (rpat', res) <- tc_pat pat_ty penv rpat thing_inside

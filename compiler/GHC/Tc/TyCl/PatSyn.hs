@@ -1056,9 +1056,8 @@ tcPatToExpr name args pat = go pat
                                     = return $ unLoc $ foldl' nlHsApp (noLocA neg)
                                                        [noLocA (HsOverLit noAnn n)]
         | otherwise                 = return $ HsOverLit noAnn n
-    go1 (SplicePat _ (XSplice (_, HsSplicedPat pat)))
-                                    = go1 pat
-    go1 (SplicePat _ (XSplice{})) = panic "Invalid splice variety"
+    go1 (SplicePat (HsUntypedSpliceTop _ pat) _) = go1 pat
+    go1 (SplicePat (HsUntypedSpliceNested _) _)  = undefined -- ROMES:TODO
     go1 (XPat (HsPatExpanded _ pat))= go1 pat
 
     -- See Note [Invertible view patterns]
@@ -1075,9 +1074,6 @@ tcPatToExpr name args pat = go pat
     go1 p@(WildPat {})                       = notInvertible p
     go1 p@(AsPat {})                         = notInvertible p
     go1 p@(NPlusKPat {})                     = notInvertible p
-    go1 p@(SplicePat _ (HsTypedSplice {}))   = notInvertible p
-    go1 p@(SplicePat _ (HsUntypedSplice {})) = notInvertible p
-    go1 p@(SplicePat _ (HsQuasiQuote {}))    = notInvertible p
 
     notInvertible p = Left (not_invertible_msg p)
 

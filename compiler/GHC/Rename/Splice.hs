@@ -5,7 +5,7 @@
 
 module GHC.Rename.Splice (
         rnTopSpliceDecls,
-        rnSpliceType, rnSpliceExpr, rnSplicePat, rnSpliceDecl,
+        rnSpliceType, rnTypedSpliceExpr, rnUntypedSpliceExpr, rnSplicePat, rnSpliceDecl,
         rnTypedBracket, rnUntypedBracket,
         checkThLocalName
         , traceSplice, SpliceInfo(..)
@@ -284,51 +284,43 @@ returns a bogus term/type, so that it can report more than one error.
 We don't want the type checker to see these bogus unbound variables.
 -}
 
-rnSpliceGen :: (HsSplice GhcRn -> RnM (a, FreeVars))
-                                            -- Outside brackets, run splice
-            -> (HsSplice GhcRn -> (PendingRnSplice, a))
-                                            -- Inside brackets, make it pending
-            -> HsSplice GhcPs
-            -> RnM (a, FreeVars)
-rnSpliceGen run_splice pend_splice splice
+rnUntypedSpliceGen :: (HsUntypedSplice GhcRn -> RnM (a, FreeVars))
+                                                    -- Outside brackets, run splice
+                   -> (Name -> HsUntypedSplice GhcRn -> (PendingRnSplice, a))
+                                                   -- Inside brackets, make it pending
+                   -> HsUntypedSplice GhcPs
+                   -> RnM (a, FreeVars)
+rnUntypedSpliceGen run_splice pend_splice splice
   = addErrCtxt (spliceCtxt splice) $ do
     { stage <- getStage
     ; case stage of
         Brack pop_stage RnPendingTyped
-          -> do { checkTc is_typed_splice illegalUntypedSplice
-                ; (splice', fvs) <- setStage pop_stage $
-                                    rnSplice splice
-                ; let (_pending_splice, result) = pend_splice splice'
-                ; return (result, fvs) }
+          -> failWithTc illegalUntypedSplice
 
         Brack pop_stage (RnPendingUntyped ps_var)
-          -> do { checkTc (not is_typed_splice) illegalTypedSplice
-                ; (splice', fvs) <- setStage pop_stage $
-                                    rnSplice splice
-                ; let (pending_splice, result) = pend_splice splice'
+          -> do { (splice', fvs) <- setStage pop_stage $
+                                    rnUntypedSplice splice
+                ; loc  <- getSrcSpanM
+                ; splice_name <- newLocalBndrRn (L (noAnnSrcSpan loc) unqualSplice)
+                ; let (pending_splice, result) = pend_splice splice_name splice'
                 ; ps <- readMutVar ps_var
                 ; writeMutVar ps_var (pending_splice : ps)
                 ; return (result, fvs) }
 
         _ ->  do { checkTopSpliceAllowed splice
                  ; (splice', fvs1) <- checkNoErrs $
-                                         setStage (Splice splice_type) $
-                                         rnSplice splice
+                                      setStage (Splice Untyped) $
+                                      rnUntypedSplice splice
                    -- checkNoErrs: don't attempt to run the splice if
                    -- renaming it failed; otherwise we get a cascade of
                    -- errors from e.g. unbound variables
                  ; (result, fvs2) <- run_splice splice'
                  ; return (result, fvs1 `plusFV` fvs2) } }
-   where
-     is_typed_splice = isTypedSplice splice
-     splice_type = if is_typed_splice
-                   then Typed
-                   else Untyped
 
 
 -- Nested splices are fine without TemplateHaskell because they
 -- are not executed until the top-level splice is run.
-checkTopSpliceAllowed :: HsSplice GhcPs -> RnM ()
+checkTopSpliceAllowed :: HsUntypedSplice GhcPs -> RnM ()
 checkTopSpliceAllowed splice = do
   let (herald, ext) = spliceExtension splice
   extEnabled <- xoptM ext
@@ -336,10 +328,9 @@ checkTopSpliceAllowed splice = do
     (failWith $ TcRnUnknownMessage $ mkPlainError noHints $
        text herald <+> text "are not permitted without" <+> ppr ext)
   where
-     spliceExtension :: HsSplice GhcPs -> (String, LangExt.Extension)
+     spliceExtension :: HsUntypedSplice GhcPs -> (String, LangExt.Extension)
      spliceExtension (HsQuasiQuote {}) = ("Quasi-quotes", LangExt.QuasiQuotes)
-     spliceExtension (HsTypedSplice {}) = ("Top-level splices", LangExt.TemplateHaskell)
-     spliceExtension (HsUntypedSplice {}) = ("Top-level splices", LangExt.TemplateHaskell)
+     spliceExtension (HsUntypedSpliceExpr {}) = ("Top-level splices", LangExt.TemplateHaskell)
 
 ------------------
 
@@ -351,7 +342,7 @@ runRnSplice :: UntypedSpliceFlavour
             -> (LHsExpr GhcTc -> TcRn res)
             -> (res -> SDoc)    -- How to pretty-print res
                                 -- Usually just ppr, but not for [Decl]
-            -> HsSplice GhcRn   -- Always untyped
+            -> HsUntypedSplice GhcRn
             -> TcRn (res, [ForeignRef (TH.Q ())])
 runRnSplice flavour run_meta ppr_res splice
   = do { hooks <- hsc_hooks <$> getTopEnv
@@ -360,10 +351,8 @@ runRnSplice flavour run_meta ppr_res splice
             Just h  -> h splice
 
        ; let the_expr = case splice' of
-                HsUntypedSplice _ _ e      ->  e
-                HsQuasiQuote (_, q) qs str -> mkQuasiQuoteExpr flavour q qs str
-                HsTypedSplice {}           -> pprPanic "runRnSplice" (ppr splice)
-                XSplice {}                 -> pprPanic "runRnSplice" (ppr splice)
+                HsUntypedSpliceExpr _ e ->  e
+                HsQuasiQuote q str -> mkQuasiQuoteExpr flavour q str
 
              -- Typecheck the expression
        ; meta_exp_ty   <- tcMetaTy meta_ty_name
@@ -400,23 +389,20 @@ runRnSplice flavour run_meta ppr_res splice
 
 ------------------
 makePending :: UntypedSpliceFlavour
-            -> HsSplice GhcRn
+            -> Name
+            -> HsUntypedSplice GhcRn
             -> PendingRnSplice
-makePending flavour (HsUntypedSplice (_, n) _ e)
+makePending flavour n (HsUntypedSpliceExpr _ e)
   = PendingRnSplice flavour n e
-makePending flavour (HsQuasiQuote (n, quoter) q_span quote)
-  = PendingRnSplice flavour n (mkQuasiQuoteExpr flavour quoter q_span quote)
-makePending _ splice@(HsTypedSplice {})
-  = pprPanic "makePending" (ppr splice)
-makePending _ splice@(XSplice {})
-  = pprPanic "makePending" (ppr splice)
+makePending flavour n (HsQuasiQuote quoter quote)
+  = PendingRnSplice flavour n (mkQuasiQuoteExpr flavour quoter quote)
 
 ------------------
-mkQuasiQuoteExpr :: UntypedSpliceFlavour -> Name -> SrcSpan -> FastString
+mkQuasiQuoteExpr :: UntypedSpliceFlavour -> Name -> Located FastString
                  -> LHsExpr GhcRn
 -- Return the expression (quoter "...quote...")
 -- which is what we must run in a quasi-quote
-mkQuasiQuoteExpr flavour quoter q_span' quote
+mkQuasiQuoteExpr flavour quoter (L q_span' quote)
   = L q_span $ HsApp noComments (L q_span
              $ HsApp noComments (L q_span
                     (HsVar noExtField (L (la2na q_span) quote_selector)))
@@ -433,64 +419,91 @@ mkQuasiQuoteExpr flavour quoter q_span' quote
                        UntypedDeclSplice -> quoteDecName
 
 ---------------------
-rnSplice :: HsSplice GhcPs -> RnM (HsSplice GhcRn, FreeVars)
+unqualSplice :: RdrName
+unqualSplice = mkRdrUnqual (mkVarOccFS (fsLit "splice"))
+
+rnUntypedSplice :: HsUntypedSplice GhcPs -> RnM (HsUntypedSplice GhcRn, FreeVars)
 -- Not exported...used for all
-rnSplice (HsTypedSplice (x, splice_name) hasParen expr)
-  = do  { loc  <- getSrcSpanM
-        ; n' <- newLocalBndrRn (L (noAnnSrcSpan loc) splice_name)
-        ; (expr', fvs) <- rnLExpr expr
-        ; return (HsTypedSplice (x, n') hasParen expr', fvs) }
+rnUntypedSplice (HsUntypedSpliceExpr annCo expr)
+  = do  { (expr', fvs) <- rnLExpr expr
+        ; return (HsUntypedSpliceExpr annCo expr', fvs) }
 
-rnSplice (HsUntypedSplice (x, splice_name) hasParen expr)
-  = do  { loc  <- getSrcSpanM
-        ; n' <- newLocalBndrRn (L (noAnnSrcSpan loc) splice_name)
-        ; (expr', fvs) <- rnLExpr expr
-        ; return (HsUntypedSplice (x, n') hasParen expr', fvs) }
-
-rnSplice (HsQuasiQuote (splice_name, quoter) q_loc quote)
-  = do  { loc  <- getSrcSpanM
-        ; splice_name' <- newLocalBndrRn (L (noAnnSrcSpan loc) splice_name)
-
-          -- Rename the quoter; akin to the HsVar case of rnExpr
+rnUntypedSplice (HsQuasiQuote quoter quote)
+  = do  { -- Rename the quoter; akin to the HsVar case of rnExpr
         ; quoter' <- lookupOccRn quoter
         ; this_mod <- getModule
         ; when (nameIsLocalOrFrom this_mod quoter') $
           checkThLocalName quoter'
 
-        ; return (HsQuasiQuote (splice_name', quoter') q_loc quote
-                                                             , unitFV quoter') }
+        ; return (HsQuasiQuote quoter' quote, unitFV quoter') }
 
 ---------------------
-rnSpliceExpr :: HsSplice GhcPs -> RnM (HsExpr GhcRn, FreeVars)
-rnSpliceExpr splice
-  = rnSpliceGen run_expr_splice pend_expr_splice splice
+rnTypedSpliceExpr :: XTypedSplice GhcPs
+                  -> LHsExpr GhcPs      -- Typed splice expression
+                  -> RnM (HsExpr GhcRn, FreeVars)
+rnTypedSpliceExpr (annCo, annL) expr
+  = addErrCtxt (hang (text "In the typed splice:") 2 ({- ROMES:TODO: Correct typed ppr with $$ -} ppr expr)) $ do
+    { stage <- getStage
+    ; case stage of
+        Brack pop_stage RnPendingTyped
+          -> setStage pop_stage rnTypedNestedSplice
+
+        Brack _ (RnPendingUntyped ps_var)
+          -> failWithTc illegalTypedSplice
+
+        _ -> do { extEnabled <- xoptM LangExt.TemplateHaskell
+                ; unless extEnabled
+                    (failWith $ TcRnUnknownMessage $ mkPlainError noHints $
+                       text "Top-level splices are not permitted without"
+                         <+> ppr LangExt.TemplateHaskell)
+
+                ; (result, fvs1) <- checkNoErrs $ setStage (Splice Typed) rnTypedTopSplice
+                  -- checkNoErrs: don't attempt to run the splice if
+                  -- renaming it failed; otherwise we get a cascade of
+                  -- errors from e.g. unbound variables
+
+                  -- Run typed splice later, in the type checker
+                  -- Ugh!  See Note [Splices] above
+                ; traceRn "rnTypedSpliceExpr: typed expression splice" empty
+                ; lcl_rdr <- getLocalRdrEnv
+                ; gbl_rdr <- getGlobalRdrEnv
+                ; let gbl_names = mkNameSet [greMangledName gre | gre <- globalRdrEnvElts gbl_rdr
+                                                          , isLocalGRE gre]
+                      lcl_names = mkNameSet (localRdrEnvElts lcl_rdr)
+                      fvs2      = lcl_names `plusFV` gbl_names
+
+                ; return (result, fvs1 `plusFV` fvs2) } }
   where
-    pend_expr_splice :: HsSplice GhcRn -> (PendingRnSplice, HsExpr GhcRn)
-    pend_expr_splice rn_splice
-        = (makePending UntypedExpSplice rn_splice, HsSpliceE noAnn rn_splice)
+    rnTypedNestedSplice :: RnM (HsExpr GhcRn, FreeVars)
+    rnTypedNestedSplice =
+      do { loc <- getSrcSpanM
+         ; n' <- newLocalBndrRn (L (noAnnSrcSpan loc) unqualSplice)
+         ; (expr', fvs) <- rnLExpr expr
+         ; return (HsTypedSplice (NestedTypedSplice n') expr', fvs) }
 
-    run_expr_splice :: HsSplice GhcRn -> RnM (HsExpr GhcRn, FreeVars)
+    rnTypedTopSplice :: RnM (HsExpr GhcRn, FreeVars)
+    rnTypedTopSplice =
+      do { (expr', fvs) <- rnLExpr expr
+         ; return (HsTypedSplice TopLevelTypedSplice expr', fvs) }
+
+rnUntypedSpliceExpr :: HsUntypedSplice GhcPs -> RnM (HsExpr GhcRn, FreeVars)
+rnUntypedSpliceExpr splice
+  = rnUntypedSpliceGen run_expr_splice pend_expr_splice splice
+  where
+    pend_expr_splice :: Name -> HsUntypedSplice GhcRn -> (PendingRnSplice, HsExpr GhcRn)
+    pend_expr_splice name rn_splice
+        = (makePending UntypedExpSplice name rn_splice, HsUntypedSplice (HsUntypedSpliceNested name) rn_splice)
+
+    run_expr_splice :: HsUntypedSplice GhcRn -> RnM (HsExpr GhcRn, FreeVars)
     run_expr_splice rn_splice
-      | isTypedSplice rn_splice   -- Run it later, in the type checker
-      = do {  -- Ugh!  See Note [Splices] above
-             traceRn "rnSpliceExpr: typed expression splice" empty
-           ; lcl_rdr <- getLocalRdrEnv
-           ; gbl_rdr <- getGlobalRdrEnv
-           ; let gbl_names = mkNameSet [greMangledName gre | gre <- globalRdrEnvElts gbl_rdr
-                                                     , isLocalGRE gre]
-                 lcl_names = mkNameSet (localRdrEnvElts lcl_rdr)
-
-           ; return (HsSpliceE noAnn rn_splice, lcl_names `plusFV` gbl_names) }
-
-      | otherwise  -- Run it here, see Note [Running splices in the Renamer]
-      = do { traceRn "rnSpliceExpr: untyped expression splice" empty
+      = do { traceRn "rnUntypedSpliceExpr: untyped expression splice" empty
+             -- Run it here, see Note [Running splices in the Renamer]
            ; (rn_expr, mod_finalizers) <-
                 runRnSplice UntypedExpSplice runMetaE ppr rn_splice
            ; (lexpr3, fvs) <- checkNoErrs (rnLExpr rn_expr)
              -- See Note [Delaying modFinalizers in untyped splices].
-           ; let e =  HsSpliceE noAnn
-                    . XSplice . (ThModFinalizers mod_finalizers,)
-                    . HsSplicedExpr
+           ; let e =  flip HsUntypedSplice rn_splice
+                    . HsUntypedSpliceTop (ThModFinalizers mod_finalizers)
                         <$> lexpr3
            ; return (gHsPar e, fvs)
            }
@@ -646,13 +659,13 @@ References:
 -}
 
 ----------------------
-rnSpliceType :: HsSplice GhcPs -> RnM (HsType GhcRn, FreeVars)
+rnSpliceType :: HsUntypedSplice GhcPs -> RnM (HsType GhcRn, FreeVars)
 rnSpliceType splice
-  = rnSpliceGen run_type_splice pend_type_splice splice
+  = rnUntypedSpliceGen run_type_splice pend_type_splice splice
   where
-    pend_type_splice rn_splice
-       = ( makePending UntypedTypeSplice rn_splice
-         , HsSpliceTy noExtField rn_splice)
+    pend_type_splice name rn_splice
+       = ( makePending UntypedTypeSplice name rn_splice
+         , HsSpliceTy (HsUntypedSpliceNested name) rn_splice)
 
     run_type_splice rn_splice
       = do { traceRn "rnSpliceType: untyped type splice" empty
@@ -663,10 +676,9 @@ rnSpliceType splice
                                     -- checkNoErrs: see Note [Renamer errors]
              -- See Note [Delaying modFinalizers in untyped splices].
            ; return ( HsParTy noAnn
-                              $ HsSpliceTy noExtField
-                              . XSplice . (ThModFinalizers mod_finalizers,)
-                              . HsSplicedTy <$>
-                              hs_ty3
+                              $ flip HsSpliceTy rn_splice
+                              . HsUntypedSpliceTop (ThModFinalizers mod_finalizers)
+                                  <$> hs_ty3
                     , fvs
                     ) }
               -- Wrap the result of the splice in parens so that we don't
@@ -714,51 +726,44 @@ whole signature, instead of as an arbitrary type.
 
 ----------------------
 -- | Rename a splice pattern. See Note [rnSplicePat]
-rnSplicePat :: HsSplice GhcPs -> RnM ( Either (ThModFinalizers, Pat GhcPs) (HsSplice GhcRn)
-                                       , FreeVars)
+rnSplicePat :: HsUntypedSplice GhcPs -> RnM ( Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult a (Pat GhcPs))
+                                                     (Pat GhcRn)
+                                            , FreeVars)
 rnSplicePat splice
-  = rnSpliceGen run_pat_splice pend_pat_splice splice
+  = rnUntypedSpliceGen run_pat_splice pend_pat_splice splice
   where
-    pend_pat_splice :: HsSplice GhcRn ->
-                       (PendingRnSplice, Either b (HsSplice GhcRn))
-    pend_pat_splice rn_splice
-      = (makePending UntypedPatSplice rn_splice
-        , Right rn_splice)
+    pend_pat_splice name rn_splice
+      = (makePending UntypedPatSplice name rn_splice
+        , Right (SplicePat (HsUntypedSpliceNested name) rn_splice)) -- Pat splice is nested and thus simply renamed
 
-    run_pat_splice :: HsSplice GhcRn ->
-                      RnM (Either (ThModFinalizers
-                                  , Pat GhcPs) -- ROMES:TODO: explain in note..
-                                               -- Spliced Pattern to be used with constructor HsSplicedPat
-                                  (HsSplice GhcRn)
-                          , FreeVars)
-    run_pat_splice rn_splice
+    run_pat_splice rn_splice -- ROMES:TODO: explain in note..
       = do { traceRn "rnSplicePat: untyped pattern splice" empty
            ; (pat, mod_finalizers) <-
                 runRnSplice UntypedPatSplice runMetaP ppr rn_splice
              -- See Note [Delaying modFinalizers in untyped splices].
-           ; let p = (ThModFinalizers mod_finalizers, gParPat pat)
-           ; return (Left p, emptyFVs) }
+           ; let p = HsUntypedSpliceTop (ThModFinalizers mod_finalizers) (gParPat pat)
+           ; return (Left (rn_splice, p), emptyFVs) }
               -- Wrap the result of the quasi-quoter in parens so that we don't
               -- lose the outermost location set by runQuasiQuote (#7918)
 
 ----------------------
 rnSpliceDecl :: SpliceDecl GhcPs -> RnM (SpliceDecl GhcRn, FreeVars)
 rnSpliceDecl (SpliceDecl _ (L loc splice) flg)
-  = rnSpliceGen run_decl_splice pend_decl_splice splice
+  = rnUntypedSpliceGen run_decl_splice pend_decl_splice splice
   where
-    pend_decl_splice rn_splice
-       = ( makePending UntypedDeclSplice rn_splice
+    pend_decl_splice name rn_splice
+       = ( makePending UntypedDeclSplice name rn_splice
          , SpliceDecl noExtField (L loc rn_splice) flg)
 
     run_decl_splice rn_splice  = pprPanic "rnSpliceDecl" (ppr rn_splice)
 
-rnTopSpliceDecls :: HsSplice GhcPs -> RnM ([LHsDecl GhcPs], FreeVars)
+rnTopSpliceDecls :: HsUntypedSplice GhcPs -> RnM ([LHsDecl GhcPs], FreeVars)
 -- Declaration splice at the very top level of the module
 rnTopSpliceDecls splice
    =  do { checkTopSpliceAllowed splice
          ; (rn_splice, fvs) <- checkNoErrs $
                                setStage (Splice Untyped) $
-                               rnSplice splice
+                               rnUntypedSplice splice
            -- As always, be sure to checkNoErrs above lest we end up with
            -- holes making it to typechecking, hence #12584.
            --
@@ -819,14 +824,13 @@ Pat RdrName (the result of running a top-level splice) or a Pat Name
 rnSplicePat.
 -}
 
-spliceCtxt :: HsSplice GhcPs -> SDoc
+spliceCtxt :: HsUntypedSplice GhcPs -> SDoc
 spliceCtxt splice
   = hang (text "In the" <+> what) 2 (ppr splice)
   where
     what = case splice of
-             HsUntypedSplice {} -> text "untyped splice:"
-             HsTypedSplice   {} -> text "typed splice:"
-             HsQuasiQuote    {} -> text "quasi-quotation:"
+             HsUntypedSpliceExpr {} -> text "untyped splice:"
+             HsQuasiQuote        {} -> text "quasi-quotation:"
 
 -- | The splice data to be logged
 data SpliceInfo

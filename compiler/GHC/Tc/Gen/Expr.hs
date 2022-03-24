@@ -854,11 +854,12 @@ tcExpr (HsProjection _ _) _ = panic "GHC.Tc.Gen.Expr: tcExpr: HsProjection: Not 
 -- Here we get rid of it and add the finalizers to the global environment.
 --
 -- See Note [Delaying modFinalizers in untyped splices] in GHC.Rename.Splice.
-tcExpr (HsSpliceE _ (XSplice (mod_finalizers, HsSplicedExpr expr)))
+tcExpr (HsUntypedSplice (HsUntypedSpliceTop mod_finalizers expr) _)
        res_ty
   = do addModFinalizersWithLclEnv mod_finalizers
        tcExpr expr res_ty
-tcExpr (HsSpliceE _ splice)          res_ty = tcSpliceExpr splice res_ty
+tcExpr (HsUntypedSplice (HsUntypedSpliceNested _) _) _ = undefined -- ROMES:TODO:
+tcExpr (HsTypedSplice ext splice) res_ty = tcSpliceExpr ext splice res_ty
 tcExpr e@(HsTypedBracket _ body) res_ty = tcTypedBracket e body res_ty
 tcExpr e@(HsUntypedBracket ps body) res_ty = tcUntypedBracket e body ps res_ty
 

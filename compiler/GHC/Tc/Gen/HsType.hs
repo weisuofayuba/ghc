@@ -1043,8 +1043,10 @@ tc_infer_hs_type mode (HsKindSig _ ty sig)
 -- splices or not.
 --
 -- See Note [Delaying modFinalizers in untyped splices].
-tc_infer_hs_type mode (HsSpliceTy _ (XSplice (_, HsSplicedTy ty)))
+tc_infer_hs_type mode (HsSpliceTy (HsUntypedSpliceTop _ ty) _)
   = tc_infer_hs_type mode ty
+
+tc_infer_hs_type _ (HsSpliceTy (HsUntypedSpliceNested _) _) = pprPanic "ROMES:TODO: panic on tc_hs_type nested splice" undefined -- ROMES:TODO:
 
 tc_infer_hs_type mode (HsDocTy _ ty _) = tc_infer_lhs_type mode ty
 
@@ -1151,15 +1153,12 @@ tc_hs_type _ ty@(HsRecTy {})      _
 -- while capturing the local environment.
 --
 -- See Note [Delaying modFinalizers in untyped splices].
-tc_hs_type mode (HsSpliceTy _ (XSplice (mod_finalizers, HsSplicedTy ty)))
+tc_hs_type mode (HsSpliceTy (HsUntypedSpliceTop mod_finalizers ty) _)
            exp_kind
   = do addModFinalizersWithLclEnv mod_finalizers
        tc_hs_type mode ty exp_kind
 
--- This should never happen; type splices are expanded by the renamer
-tc_hs_type _ ty@(HsSpliceTy {}) _exp_kind
-  = failWithTc $ TcRnUnknownMessage $ mkPlainError noHints $
-     (text "Unexpected type splice:" <+> ppr ty)
+tc_hs_type _ (HsSpliceTy (HsUntypedSpliceNested _) _) _ = pprPanic "ROMES:TODO: panic on tc_hs_type nested splice" undefined -- ROMES:TODO:
 
 ---------- Functions and applications
 tc_hs_type mode (HsFunTy _ mult ty1 ty2) exp_kind

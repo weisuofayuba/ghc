@@ -69,7 +69,7 @@ module GHC.Hs.Decls (
   -- ** @default@ declarations
   DefaultDecl(..), LDefaultDecl,
   -- ** Template haskell declaration splice
-  SpliceExplicitFlag(..),
+  SpliceDecoration(..),
   SpliceDecl(..), LSpliceDecl,
   -- ** Foreign function interface declarations
   ForeignDecl(..), LForeignDecl, ForeignImport(..), ForeignExport(..),
