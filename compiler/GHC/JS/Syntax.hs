@@ -59,16 +59,17 @@ import Control.DeepSeq
 import Data.Function
 import qualified Data.Map as M
 import qualified Data.Set as Set
-import Data.Binary
 import Data.Data
+import Data.Word
 import qualified Data.Semigroup as Semigroup
 
 import GHC.Generics
 
+import Data.Binary
 import GHC.Utils.Outputable (Outputable (..))
 import qualified GHC.Utils.Outputable as O
 import qualified GHC.Data.ShortText as ST
-import GHC.Data.ShortText (ShortText)
+import GHC.Data.ShortText (ShortText())
 import GHC.Utils.Monad.State.Strict
 
 -- FIXME: Jeff (2022,03): This state monad is strict, but uses a lazy list as
@@ -327,7 +328,9 @@ instance Show SaneDouble where
 -- | Identifiers
 newtype Ident = TxtI { itxt:: ShortText}
  deriving stock (Show, Typeable, Ord, Eq, Generic)
- deriving newtype (Binary, NFData)
+ deriving newtype (Binary, NFData) -- FIXME: Jeff (2022,03): ShortText uses Data.Binary
+                                   -- rather than GHC.Utils.Binary. What is the
+                                   -- difference? See related FIXME in StgToJS.Object
 
 
 --------------------------------------------------------------------------------

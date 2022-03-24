@@ -268,8 +268,6 @@ data ExprResult
 newtype ExprValData = ExprValData [JExpr]
   deriving newtype (Eq, Ord, Show)
 
-
-
 -- closure types
 data ClosureType = Thunk | Fun | Pap | Con | Blackhole | StackFrame
   deriving (Show, Eq, Ord, Enum, Bounded)

@@ -16,9 +16,28 @@
 --  the symbols that have already been linked. These symbols are not included
 --  again in the incrementally linked program.
 --
+-- The Base data structure contains the information we need to do incremental
+-- linking against a base bundle.
+--
+--  base file format:
+--  - GHCJSBASE
+--  - [renamer state]
+--  - [linkedPackages]
+--  - [packages]
+--  - [modules]
+--  - [symbols]
+--
 --  The base contains a CompactorState for consistent renaming of private names
 --  and packed initialization of info tables and static closures.
 
+-- FIXMEs
+--  - Find a better data structure for linkerArchiveDeps
+--  - Specialize Functor instances for helpers
+--  - Better name for Base
+--  - Remove unsafeShowSDoc
+--  - Better implementation for Monoid JSLinkConfig
+--  - Should we use (Messages String) or parameterize over (Messages e) in ThRunner?
+--  - Fix name collision between LinkableUnit type in this module and the LinkableUnit type in StgToJS.Types
 -----------------------------------------------------------------------------
 
 module GHC.StgToJS.Linker.Types where
@@ -29,6 +48,10 @@ import           GHC.StgToJS.Object
 import           GHC.Unit.Types
 import           GHC.Utils.Panic
 import           GHC.Utils.Outputable hiding ((<>))
+import           GHC.Data.ShortText   (ShortText)
+import qualified GHC.Data.ShortText   as T
+import           GHC.Driver.Env.Types (HscEnv)
+import           GHC.Types.Error      (Messages)
 
 import           Control.Monad
 
@@ -36,12 +59,19 @@ import           Data.Array
 import qualified Data.Binary          as DB
 import qualified Data.Binary.Get      as DB
 import qualified Data.Binary.Put      as DB
-import qualified Data.Map             as M
+import           Data.ByteString      (ByteString)
+import qualified Data.ByteString.Lazy as BL
+import           Data.Map.Strict      (Map)
+import qualified Data.Map.Strict      as M
 import           Data.Set             (Set)
 import qualified Data.Set             as S
-import           GHC.Data.ShortText   (ShortText)
-import qualified GHC.Data.ShortText   as T
-import           Data.ByteString      (ByteString)
+import qualified Data.IntMap          as I
+
+import           Control.Concurrent.MVar
+import qualified Control.Exception as E
+
+import           System.IO
+import           System.Process
 
 import           Prelude
 
@@ -57,16 +87,23 @@ newLocals = filter (not . isJsKeyword) $
 renamedVars :: [Ident]
 renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) newLocals
 
+--------------------------------------------------------------------------------
+-- CompactorState
+--------------------------------------------------------------------------------
+
 data CompactorState = CompactorState
-  { csIdentSupply   :: [Ident]               -- ^ ident supply for new names
+  { csIdentSupply   :: [Ident]                  -- ^ ident supply for new names
   , csNameMap       :: !(M.Map ShortText Ident) -- ^ renaming mapping for internal names
-  , csEntries       :: !(M.Map ShortText Int)   -- ^ entry functions (these get listed in the metadata init array)
+  , csEntries       :: !(M.Map ShortText Int)   -- ^ entry functions (these get listed in the metadata init
+                                                -- array)
   , csNumEntries    :: !Int
-  , csStatics       :: !(M.Map ShortText Int)   -- ^ mapping of global closure -> index in current block, for static initialisation
-  , csNumStatics    :: !Int                  -- ^ number of static entries
+  , csStatics       :: !(M.Map ShortText Int)   -- ^ mapping of global closure -> index in current block,
+                                                -- for static initialisation
+  , csNumStatics    :: !Int                     -- ^ number of static entries
   , csLabels        :: !(M.Map ShortText Int)   -- ^ non-Haskell JS labels
-  , csNumLabels     :: !Int                  -- ^ number of labels
-  , csParentEntries :: !(M.Map ShortText Int)   -- ^ entry functions we're not linking, offset where parent gets [0..n], grandparent [n+1..k] etc
+  , csNumLabels     :: !Int                     -- ^ number of labels
+  , csParentEntries :: !(M.Map ShortText Int)   -- ^ entry functions we're not linking, offset where parent
+                                                -- gets [0..n], grandparent [n+1..k] etc
   , csParentStatics :: !(M.Map ShortText Int)   -- ^ objects we're not linking in base bundle
   , csParentLabels  :: !(M.Map ShortText Int)   -- ^ non-Haskell JS labels in parent
   , csStringTable   :: !StringTable
@@ -90,6 +127,8 @@ instance DB.Binary StringTable where
 emptyStringTable :: StringTable
 emptyStringTable = StringTable (listArray (0,-1) []) M.empty M.empty
 
+-- FIXME: Jeff: (2022,03): Each of these helper functions carry a Functor f
+-- constraint. We should specialize these once we know how they are used
 entries :: Functor f
         => (M.Map ShortText Int -> f (M.Map ShortText Int))
         -> CompactorState
@@ -188,15 +227,23 @@ emptyCompactorState = CompactorState renamedVars
                                      mempty
                                      emptyStringTable
 
-showBase :: Base -> String
-showBase b = unlines
-  [ "Base:"
-  , "  packages: " ++ showSDocUnsafe (ppr (basePkgs b)) -- FIXME: Jeff (2022,03): Either use the sdoc context in the StgToJS
-                                                        -- config or find a better way
-  , "  number of units: " ++ show (S.size $ baseUnits b)
-  , "  renaming table size: " ++
-    show (M.size . csNameMap . baseCompactorState $ b)
-  ]
+-- | make a base state from a CompactorState: empty the current symbols sets,
+--   move everything to the parent
+makeCompactorParent :: CompactorState -> CompactorState
+makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls sts)
+  = CompactorState is
+                   nm
+                   M.empty 0
+                   M.empty 0
+                   M.empty 0
+                   (M.union (fmap (+nes) pes) es)
+                   (M.union (fmap (+nss) pss) ss)
+                   (M.union (fmap (+nls) pls) ls)
+                   sts
+
+--------------------------------------------------------------------------------
+-- Base
+--------------------------------------------------------------------------------
 
 -- FIXME: Jeff (2022,03): Pick a better name than Base
 -- | The Base bundle. Used for incremental linking it maintains the compactor
@@ -205,6 +252,20 @@ data Base = Base { baseCompactorState :: CompactorState
                  , basePkgs           :: [Module]
                  , baseUnits          :: Set (Module, ShortText, Int)
                  }
+
+instance DB.Binary Base where
+  get = getBase "<unknown file>"
+  put = putBase
+
+showBase :: Base -> String
+showBase b = unlines
+  [ "Base:"
+  , "  packages: " ++ showSDocUnsafe (ppr (basePkgs b)) -- FIXME: Jeff (2022,03): Either use the sdoc context in the StgToJS
+                                                        -- config or find a better way than showSDocUnsafe
+  , "  number of units: " ++ show (S.size $ baseUnits b)
+  , "  renaming table size: " ++
+    show (M.size . csNameMap . baseCompactorState $ b)
+  ]
 
 emptyBase :: Base
 emptyBase = Base emptyCompactorState [] S.empty
@@ -288,20 +349,175 @@ getBase file = getBase'
       funs <- getList (getFun pkgs mods)
       return (Base cs linkedPackages $ S.fromList funs)
 
--- | make a base state from a CompactorState: empty the current symbols sets,
---   move everything to the parent
-makeCompactorParent :: CompactorState -> CompactorState
-makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls sts)
-  = CompactorState is
-                   nm
-                   M.empty 0
-                   M.empty 0
-                   M.empty 0
-                   (M.union (fmap (+nes) pes) es)
-                   (M.union (fmap (+nss) pss) ss)
-                   (M.union (fmap (+nls) pls) ls)
-                   sts
+-- | lazily render the base metadata into a bytestring
+renderBase :: Base -> BL.ByteString
+renderBase = DB.runPut . putBase
 
-instance DB.Binary Base where
-  get = getBase "<unknown file>"
-  put = putBase
+-- | lazily load base metadata from a file, see @UseBase@.
+loadBase :: FilePath -> IO Base
+loadBase file = DB.runGet (getBase file) <$> BL.readFile file
+
+-- | There are 3 ways the linker can use @Base@. We can not use it, and thus not
+-- do any incremental linking. We can load it from a file, where we assume that
+-- the symbols from the bundle and their dependencies have already been loaded.
+-- In this case We must save the CompactorState so that we can do consistent
+-- renaming. Or we can use a Base that is already in memory.
+--
+-- Incremental linking greatly improves link time and can also be used in
+-- multi-page or repl-type applications to serve most of the code from a static
+-- location, reloading only the small parts that are actually different.
+data UseBase = NoBase             -- ^ don't use incremental linking
+             | BaseFile  FilePath -- ^ load base from file
+             | BaseState Base     -- ^ use this base
+
+instance Show UseBase where
+  show NoBase       = "NoBase"
+  show BaseFile {}  = "BaseFile"
+  show BaseState {} = "BaseState"
+
+instance Monoid UseBase where
+  mempty             = NoBase
+
+instance Semigroup UseBase where
+  x <> NoBase = x
+  _ <> x      = x
+
+--------------------------------------------------------------------------------
+-- Linker Config
+-- TODO: Jeff: (2022,03): Move to separate module? Linker.Config?
+--------------------------------------------------------------------------------
+
+data JSLinkConfig =
+  JSLinkConfig { lcNativeExecutables  :: Bool
+               , lcNativeToo          :: Bool
+               , lcBuildRunner        :: Bool
+               , lcNoJSExecutables    :: Bool
+               , lcStripProgram       :: Maybe FilePath
+               , lcLogCommandLine     :: Maybe FilePath
+               , lcGhc                :: Maybe FilePath
+               , lcOnlyOut            :: Bool
+               , lcNoRts              :: Bool
+               , lcNoStats            :: Bool
+               , lcGenBase            :: Maybe String   -- ^ module name
+               , lcUseBase            :: UseBase
+               , lcLinkJsLib          :: Maybe String
+               , lcJsLibOutputDir     :: Maybe FilePath
+               , lcJsLibSrcs          :: [FilePath]
+               , lcDedupe             :: Bool
+               } deriving Show
+
+usingBase :: JSLinkConfig -> Bool
+usingBase s | NoBase <- lcUseBase s = False
+            | otherwise             = True
+
+-- | we generate a runnable all.js only if we link a complete application,
+--   no incremental linking and no skipped parts
+generateAllJs :: JSLinkConfig -> Bool
+generateAllJs s
+  | NoBase <- lcUseBase s = not (lcOnlyOut s) && not (lcNoRts s)
+  | otherwise             = False
+
+{-
+ -- FIXME: Jeff (2022,03): This instance is supposed to capture overriding
+ -- settings, where one group comes from the environment (env vars, config
+ -- files) and the other from the command line. (env `mappend` cmdLine) should
+ -- give the combined settings, but it doesn't work very well. find something
+ -- better.
+ -}
+instance Monoid JSLinkConfig where
+  mempty = JSLinkConfig False   False   False   False
+                        Nothing Nothing Nothing False
+                        False   False   Nothing NoBase
+                        Nothing Nothing mempty  False
+
+instance Semigroup JSLinkConfig where
+  (<>) (JSLinkConfig ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1 ljsl1 jslo1 jslsrc1 dd1)
+       (JSLinkConfig ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2 ljsl2 jslo2 jslsrc2 dd2) =
+          JSLinkConfig (ne1 || ne2)
+                        (nn1 || nn2)
+                        (bc1 || bc2)
+                        (nj1 || nj2)
+                        (sp1 `mplus` sp2)
+                        (lc1 `mplus` lc2)
+                        (gh1 `mplus` gh2)
+                        (oo1 || oo2)
+                        (nr1 || nr2)
+                        (ns1 || ns2)
+                        (gb1 `mplus` gb2)
+                        (ub1 <> ub2)
+                        (ljsl1 <> ljsl2)
+                        (jslo1 <> jslo2)
+                        (jslsrc1 <> jslsrc2)
+                        (dd1 || dd2)
+
+--------------------------------------------------------------------------------
+-- Linker Environment
+-- TODO: Jeff: (2022,03): Move to separate module, same as Config?
+--------------------------------------------------------------------------------
+-- | A LinkableUnit is a pair of a module and the index of the block in the
+-- object file
+-- FIXME: Jeff: (2022,03): Refactor to avoid name collision between
+-- StgToJS.Linker.Types.LinkableUnit and StgToJS.Types.LinkableUnit
+type LinkableUnit = (Module, Int)
+
+-- TODO: Jeff: (2022,03):  Where to move LinkedObj
+-- | An object file that's either already in memory (with name) or on disk
+data LinkedObj = ObjFile   FilePath          -- ^ load from this file
+               | ObjLoaded String ByteString -- ^ already loaded: description and payload
+               deriving (Eq, Ord, Show)
+
+data GhcjsEnv = GhcjsEnv
+  { compiledModules   :: MVar (Map Module ByteString)  -- ^ keep track of already compiled modules so we don't compile twice for dynamic-too
+  , thRunners         :: MVar THRunnerState -- (Map String ThRunner)   -- ^ template haskell runners
+  , thSplice          :: MVar Int
+  -- FIXME: Jeff a Map keyed on a Set is going to be quite costly. The Eq
+  -- instance over Sets _can_ be fast if the sets are different sizes, this
+  -- would be O(1), however if they are equal size then we incur a costly
+  -- converstion to an Ascending List O(n) and then perform the element wise
+  -- check hence O(mn) where m is the cost of the element check. Thus, we should
+  -- fix this data structure and use something more efficient, HashMap if
+  -- available, IntMap if possible. Nested maps, in particular, seem like a
+  -- design smell.
+  , linkerArchiveDeps :: MVar (Map (Set FilePath)
+                                   (Map Module (Deps, DepsLocation)
+                                   , [LinkableUnit]
+                                   )
+                              )
+  , pluginState       :: MVar (Maybe HscEnv)
+  }
+
+data THRunnerState = THRunnerState
+  { activeRunners :: Map String THRunner
+  , idleRunners   :: [THRunner]
+  }
+
+data THRunner =
+  THRunner { thrProcess        :: ProcessHandle
+           , thrHandleIn       :: Handle
+           , thrHandleErr      :: Handle
+           , thrBase           :: MVar Base
+           -- FIXME: Jeff (2022,03): Is String the right type here? I chose it
+           -- because it was easy but I am unsure what the needs of its consumer
+           -- are.
+           , thrRecover        :: MVar [Messages String]
+           , thrExceptions     :: MVar (I.IntMap E.SomeException)
+           }
+
+consIdleRunner :: THRunner -> THRunnerState -> THRunnerState
+consIdleRunner r s = s { idleRunners = r : idleRunners s }
+
+unconsIdleRunner :: THRunnerState -> Maybe (THRunner, THRunnerState)
+unconsIdleRunner s
+  | (r:xs) <- idleRunners s = Just (r, s { idleRunners = xs })
+  | otherwise               = Nothing
+
+deleteActiveRunner :: String -> THRunnerState -> THRunnerState
+deleteActiveRunner m s =
+  s { activeRunners = M.delete m (activeRunners s) }
+
+insertActiveRunner :: String -> THRunner -> THRunnerState -> THRunnerState
+insertActiveRunner m runner s =
+  s { activeRunners = M.insert m runner (activeRunners s) }
+
+emptyTHRunnerState :: THRunnerState
+emptyTHRunnerState = THRunnerState mempty mempty

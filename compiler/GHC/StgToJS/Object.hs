@@ -1,13 +1,13 @@
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE Rank2Types #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE Rank2Types                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TupleSections              #-}
+
+-- only for DB.Binary instances on Module see FIXME below
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -37,7 +37,7 @@
 --   - closureinfo index
 --   - closureinfo data (offsets described by index)
 
--- FIXME: Jeff (2022,03): Theare orphan instances for DB.Binary Module and
+-- FIXME: Jeff (2022,03): There are orphan instances for DB.Binary Module and
 -- ModuleName. These are needed in StgToJS.Linker.Types for @Base@ serialization
 -- in @putBase@. We end up in this situation because Base now holds a @Module@
 -- type instead of GHCJS's previous @Package@ type. In addition to this GHC uses
@@ -72,7 +72,7 @@ module GHC.StgToJS.Object
   , Objectable(..)
   , PutS
   -- end exports for Linker.Types
-  , Deps (..), BlockDeps (..)
+  , Deps (..), BlockDeps (..), DepsLocation (..)
   , ExpFun (..), ExportedFun (..)
   , versionTag, versionTagLength
   )
@@ -139,6 +139,12 @@ data Deps = Deps
   , depsHaskellExported :: !(Map ExportedFun Int)  -- ^ exported Haskell functions -> block
   , depsBlocks          :: !(Array Int  BlockDeps) -- ^ info about each block
   } deriving (Generic)
+
+-- | Where are the dependencies
+data DepsLocation = ObjectFile  FilePath           -- ^ In an object file at path
+                  | ArchiveFile FilePath           -- ^ In a Ar file at path
+                  | InMemory    String ByteString  -- ^ In memory
+                  deriving (Eq, Show)
 
 data BlockDeps = BlockDeps
   { blockBlockDeps       :: [Int]         -- ^ dependencies on blocks in this object
@@ -772,12 +778,22 @@ instance DB.Binary ModuleName where
 instance DB.Binary Unit where
   put = \case
     RealUnit (Definite uid) -> DB.put (0 :: Int) >> DB.put uid
-    VirtUnit uid            -> DB.put 1          >> DB.put uid
-    HoleUnit                -> DB.put 2
+    VirtUnit uid            -> DB.put (1 :: Int) >> DB.put uid
+    HoleUnit                -> DB.put (2 :: Int)
   get = DB.get >>= \case
-    (0 :: Int) -> (RealUnit . Definite) <$> DB.get
+    (0 :: Int) -> RealUnit . Definite <$> DB.get
     1          -> VirtUnit              <$> DB.get
     _          -> pure HoleUnit
+
+instance DB.Binary UnitId where
+  put (UnitId fs) = DB.put fs
+  get = UnitId <$> DB.get
+
+instance DB.Binary InstantiatedUnit where
+  put indef = do
+    DB.put (instUnitInstanceOf indef)
+    DB.put (instUnitInsts indef)
+  get = mkInstantiatedUnitSorted <$> DB.get <*> DB.get
 
 instance Objectable ModuleName where
   put (ModuleName fs) = put fs
