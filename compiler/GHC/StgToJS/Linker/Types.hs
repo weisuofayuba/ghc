@@ -384,7 +384,7 @@ instance Semigroup UseBase where
 
 --------------------------------------------------------------------------------
 -- Linker Config
--- TODO: Jeff: (2022,03): Move to separate module? Linker.Config?
+-- TODO: Jeff: (2022,03): Move to separate module? Linker.Config? Or Merge with StgToJSConfig?
 --------------------------------------------------------------------------------
 
 data JSLinkConfig =
