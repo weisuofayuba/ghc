@@ -51,7 +51,7 @@ encodeModule :: HscEnv -> Module -> String
 encodeModule env k
   | isGhcjsPrimUnit env (moduleUnitId k) = "ghcjs-prim"
   | isGhcjsThUnit   env (moduleUnitId k) = "ghcjs-th"
-  | otherwise                               = unitModuleString k
+  | otherwise                            = unitModuleString k
 
 {-
    some packages are wired into GHCJS, but not GHC

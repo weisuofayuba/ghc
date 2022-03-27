@@ -392,6 +392,7 @@ data JSLinkConfig =
                , lcNativeToo          :: Bool
                , lcBuildRunner        :: Bool
                , lcNoJSExecutables    :: Bool
+               , lcNoHsMain           :: Bool
                , lcStripProgram       :: Maybe FilePath
                , lcLogCommandLine     :: Maybe FilePath
                , lcGhc                :: Maybe FilePath
@@ -425,18 +426,21 @@ generateAllJs s
  -- better.
  -}
 instance Monoid JSLinkConfig where
-  mempty = JSLinkConfig False   False   False   False
+  -- FIXME: Jeff (2022,03): Adding no hs main to config, should False be default
+  -- here?
+  mempty = JSLinkConfig False   False   False   False False
                         Nothing Nothing Nothing False
                         False   False   Nothing NoBase
                         Nothing Nothing mempty  False
 
 instance Semigroup JSLinkConfig where
-  (<>) (JSLinkConfig ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1 ljsl1 jslo1 jslsrc1 dd1)
-       (JSLinkConfig ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2 ljsl2 jslo2 jslsrc2 dd2) =
+  (<>) (JSLinkConfig ne1 nn1 bc1 nj1 noHs1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1 ljsl1 jslo1 jslsrc1 dd1)
+       (JSLinkConfig ne2 nn2 bc2 nj2 noHs2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2 ljsl2 jslo2 jslsrc2 dd2) =
           JSLinkConfig (ne1 || ne2)
                         (nn1 || nn2)
                         (bc1 || bc2)
                         (nj1 || nj2)
+                        (noHs1 || noHs2)
                         (sp1 `mplus` sp2)
                         (lc1 `mplus` lc2)
                         (gh1 `mplus` gh2)
@@ -462,8 +466,8 @@ type LinkableUnit = (Module, Int)
 
 -- TODO: Jeff: (2022,03):  Where to move LinkedObj
 -- | An object file that's either already in memory (with name) or on disk
-data LinkedObj = ObjFile   FilePath          -- ^ load from this file
-               | ObjLoaded String ByteString -- ^ already loaded: description and payload
+data LinkedObj = ObjFile   FilePath             -- ^ load from this file
+               | ObjLoaded String BL.ByteString -- ^ already loaded: description and payload
                deriving (Eq, Ord, Show)
 
 data GhcjsEnv = GhcjsEnv

@@ -29,21 +29,24 @@ module GHC.StgToJS.Linker.Linker where
 import           GHC.StgToJS.Linker.Types
 
 import           GHC.JS.Syntax
-import           GHC.JS.Make
 
-import qualified GHC.SysTools.Ar
 import           GHC.StgToJS.Object
-import           GHC.StgToJS.Rts.Types
 import           GHC.StgToJS.Types hiding (LinkableUnit)
+import           GHC.StgToJS.UnitUtils
 
 import qualified GHC.SysTools.Ar          as Ar
 import           GHC.Utils.Encoding
+import           GHC.Utils.Outputable (ppr, vcat)
 import           GHC.Utils.Panic
+import           GHC.Unit.State
+import           GHC.Unit.Env
+import           GHC.Unit.Types
+import           GHC.Utils.Logger
+import           GHC.Driver.Env.Types
 import           GHC.Unit.Module ( UnitId
                                  , Module
-                                 , mkModuleName, wiredInUnitIds
-                                 , moduleNameString
-                                 , primUnitId
+                                 , moduleUnitId
+                                 , primUnitId, moduleNameString
                                  )
 import           GHC.Data.ShortText       (ShortText)
 import qualified GHC.Data.ShortText       as T
@@ -55,8 +58,6 @@ import           Control.Monad
 
 import           Data.Array
 import           Data.Binary
-import qualified Data.Binary.Get as DB
-import qualified Data.Binary.Put as DB
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Function            (on)
@@ -64,21 +65,26 @@ import           Data.Int
 import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS
 import           Data.IORef
-import           Data.List
-  (partition, nub, foldl', intercalate, group, sort, groupBy, isSuffixOf, find)
+import           Data.List  ( partition, nub, foldl', intercalate, group, sort
+                            , groupBy, isSuffixOf, find, intersperse
+                            )
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 
-import           GHC.Generics
+import           GHC.Generics (Generic)
 
 import           System.FilePath (splitPath, (<.>), (</>), dropExtension)
 import           System.IO
 import           System.Directory ( createDirectoryIfMissing
-                                  , canonicalizePath , doesFileExist
-                                  , getCurrentDirectory, copyFile)
+                                  , doesFileExist
+                                  , getCurrentDirectory
+                                  , Permissions(..)
+                                  , setPermissions
+                                  , getPermissions
+                                  )
 
 import Prelude
 
@@ -106,7 +112,7 @@ emptyArchiveState :: IO ArchiveState
 emptyArchiveState = ArchiveState <$> newIORef M.empty
 
 -- | link and write result to disk (jsexe directory)
-link :: DynFlags
+link :: Logger
      -> GhcjsEnv
      -> JSLinkConfig
      -> FilePath                   -- ^ output file/directory
@@ -117,18 +123,18 @@ link :: DynFlags
      -> (ExportedFun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
      -> Set ExportedFun                    -- ^ extra symbols to link in
      -> IO ()
-link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
-  | gsNoJSExecutables settings = return ()
+link logger dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
+  | lcNoJSExecutables settings = return ()
   | otherwise = do
       LinkResult lo lstats lmetasize lfrefs llW lla llarch lbase <-
         link' dflags env settings out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
-      let genBase = isJust (gsGenBase settings)
+      let genBase = isJust (lcGenBase settings)
           jsExt | genBase   = "base.js"
                 | otherwise = "js"
       createDirectoryIfMissing False out
       BL.writeFile (out </> "out" <.> jsExt) lo
-      unless (gsOnlyOut settings) $ do
+      unless (lcOnlyOut settings) $ do
         let frefsFile   = if genBase then "out.base.frefs" else "out.frefs"
             -- FIXME: Jeff (2022,03): GHCJS used Aeson to encode Foreign
             -- references as StaticDeps to a Bytestring and then write these out
@@ -136,17 +142,16 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
             -- we'll need to find an alternative coding strategy to write these
             -- out. See the commented instance for FromJSON StaticDeps below.
             -- - this line called out to the FromJSon Instance
-            -- |
-            -- v
             -- jsonFrefs  = Aeson.encode lfrefs
+            jsonFrefs  = mempty
 
         BL.writeFile (out </> frefsFile <.> "json") jsonFrefs
         BL.writeFile (out </> frefsFile <.> "js")
                      ("h$checkForeignRefs(" <> jsonFrefs <> ");")
-        unless (gsNoStats settings) $ do
+        unless (lcNoStats settings) $ do
           let statsFile = if genBase then "out.base.stats" else "out.stats"
           writeFile (out </> statsFile) (linkerStats lmetasize lstats)
-        unless (gsNoRts settings) $ do
+        unless (lcNoRts settings) $ do
           withRts <- mapM (tryReadShimFile dflags) llW
           BL.writeFile (out </> "rts.js")
             (rtsDeclsText
@@ -158,8 +163,8 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
                      (BL.fromChunks $ llarch' ++ lla')
         if genBase
           then generateBase out lbase
-          else when (not (gsOnlyOut settings) &&
-                     not (gsNoRts settings) &&
+          else when (not (lcOnlyOut settings) &&
+                     not (lcNoRts settings) &&
                      not (usingBase settings)) $ do
                  combineFiles dflags out
                  writeHtml dflags out
@@ -169,31 +174,31 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
                  writeExterns out
 
 -- | link in memory
-link' :: DynFlags
+link' :: Logger
       -> GhcjsEnv
       -> JSLinkConfig
       -> String                     -- ^ target (for progress message)
       -> [FilePath]                 -- ^ include path for home package
-      -> [UnitId]          -- ^ packages to link
+      -> [UnitId]                   -- ^ packages to link
       -> [LinkedObj]                -- ^ the object files we're linking
       -> [FilePath]                 -- ^ extra js files to include
       -> (ExportedFun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
       -> Set ExportedFun                    -- ^ extra symbols to link in
       -> IO LinkResult
-link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
+link' logger env settings target _include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
       (objDepsMap, objRequiredUnits) <- loadObjDeps objFiles
       let rootSelector | Just baseMod <- gsGenBase settings =
-                           \(ExportedFun _p m _s) -> m == T.pack baseMod
+                           \(ExportedFun  m _s) -> m == T.pack baseMod
                        | otherwise = isRootFun
           roots = S.fromList . filter rootSelector $
             concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
           rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
           objPkgs = map toPackageKey $ nub (map fst $ M.keys objDepsMap)
-      compilationProgressMsg dflags $
+      compilationProgressMsg logger $
         case gsGenBase settings of
           Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
           _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
-      base <- case gsUseBase settings of
+      base <- case lcUseBase settings of
         NoBase        -> return emptyBase
         BaseFile file -> loadBase file
         BaseState b   -> return b
@@ -211,8 +216,7 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
           getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
       pkgArchs <- getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs'')
       (allDeps, code) <-
-        collectDeps dflags
-                    (objDepsMap `M.union` archsDepsMap)
+        collectDeps (objDepsMap `M.union` archsDepsMap)
                     (pkgs' ++ [thisUnitId dflags])
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
@@ -240,13 +244,14 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
                    ))
 
 renderLinker :: JSLinkConfig
-             -> DynFlags
              -> CompactorState
              -> Set ExportedFun
              -> [(Module, JStat, ShortText, [ClosureInfo], [StaticInfo], [ForeignJSRef])] -- ^ linked code per module
              -> (BL.ByteString, Int64, CompactorState, LinkerStats)
-renderLinker settings dflags renamerState rtsDeps code =
-  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,_,ci,si,_) -> (s,ci,si)) code)
+renderLinker settings renamerState rtsDeps code =
+  let
+    -- TODO: Jeff (2022,03): implement the Compactor
+    -- (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,_,ci,si,_) -> (s,ci,si)) code)
       pe = (<>"\n") . displayT . renderPretty 0.8 150 . pretty
       rendered  = parMap rdeepseq pe compacted
       renderedMeta = pe meta
@@ -275,7 +280,11 @@ linkerStats meta s =
       (map (\xs@(((p,_),_):_) -> showPkg p <> "\n" <> unlines (map showMod xs)) pkgMods)
     metaStats = "packed metadata: " <> T.pack (show meta)
 
-rtsText' :: DynFlags -> CgSettings -> ShortText
+rtsText :: StgToJSConfig -> ShortText
+rtsText cfg = (<> newline) . rts cfg
+  where newline = T.pack "\n"
+
+rtsText' :: StgToJSConfig -> ShortText
 rtsText' = rtsText
 {- prerender RTS for faster linking (FIXME this results in a build error, why?)
 rtsText' debug = if debug
@@ -304,71 +313,82 @@ getShims = panic "Panic from getShims: Shims not implemented! no to shims!"
 --   extraFiles' <- mapM canonicalizePath extraFiles
 --   return (w, a++extraFiles')
 
-convertPkg :: DynFlags -> UnitId -> (ShortText, Version)
-convertPkg dflags p
-  = case getInstalledPackageVersion dflags p of
-      Just v -> (T.pack (getInstalledPackageName dflags p), v)
-      -- special or wired-in
-      Nothing -> (T.pack (installedUnitIdString p), Version [])
-
 {- | convenience: combine rts.js, lib.js, out.js to all.js that can be run
      directly with node.js or SpiderMonkey jsshell
  -}
-combineFiles :: DynFlags -> FilePath -> IO ()
-combineFiles dflags fp = do
+combineFiles :: JSLinkConfig -> FilePath -> IO ()
+combineFiles cfg fp = do
   files   <- mapM (B.readFile.(fp</>)) ["rts.js", "lib.js", "out.js"]
-  runMain <- if   gopt Opt_NoHsMain dflags
+  runMain <- if   lcNoHsMain cfg
              then pure mempty
              else B.readFile (getLibDir dflags </> "runmain.js")
   writeBinaryFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 -- | write the index.html file that loads the program if it does not exit
-writeHtml :: DynFlags -> FilePath -> IO ()
-writeHtml df out = do
+writeHtml :: FilePath -- ^ top level library directory
+          -> FilePath -- ^ output directory
+          -> IO ()
+writeHtml top out = do
   e <- doesFileExist htmlFile
   unless e $
-    B.readFile (getLibDir df </>"template.html") >>= B.writeFile htmlFile
+    B.readFile (top </>"template.html") >>= B.writeFile htmlFile
   where
     htmlFile = out </> "index.html"
 
--- | write the runmain.js file that will be run with defer so that it runs after index.html is loaded
-writeRunMain :: DynFlags -> FilePath -> IO ()
-writeRunMain df out = do
+-- | write the runmain.js file that will be run with defer so that it runs after
+-- index.html is loaded
+writeRunMain :: FilePath -- ^ top level library directory
+             -> FilePath -- ^ output directory
+             -> IO ()
+writeRunMain top out = do
   e <- doesFileExist runMainFile
   unless e $
-    B.readFile (getLibDir df </> "runmain.js") >>= B.writeFile runMainFile
+    B.readFile (top </> "runmain.js") >>= B.writeFile runMainFile
   where
     runMainFile = out </> "runmain.js"
 
-writeRunner :: JSLinkConfig -> DynFlags -> FilePath -> IO ()
+-- FIXME: Jeff (2022,03): Use Newtypes instead of Strings for these directories
+writeRunner :: JSLinkConfig -- ^ Settings
+            -> FilePath     -- ^ Top level directory
+            -> FilePath     -- ^ Output directory
+            -> IO ()
 writeRunner settings dflags out =
-  {-when (gsBuildRunner settings) $ -} do
+  -- FIXME: Jeff (2022,03): why was the buildRunner check removed? If we don't
+  -- need to check then does the flag need to exist?
+  {-when (lcBuildRunner settings) $ -} do
   cd    <- getCurrentDirectory
-  let runner = cd </> addExeExtension (dropExtension out)
+  let runner  = cd </> addExeExtension (dropExtension out)
       srcFile = out </> "all" <.> "js"
   -- nodeSettings <- readNodeSettings dflags
-  let nodePgm = "node" -- XXX we don't read nodeSettings.json anymore, we should somehow know how to find node?
-  if Platform.isWindows
-  then do
-    copyFile (topDir dflags </> "bin" </> "wrapper" <.> "exe")
-             runner
-    writeFile (runner <.> "options") $ unlines
-                [ T.pack nodePgm -- T.pack (nodeProgram nodeSettings)
-                , T.pack ("{{EXEPATH}}" </> out </> "all" <.> "js")
-                ]
-  else do
-    src <- readBinaryFile (cd </> srcFile)
-    -- let pgm = TE.encodeUtf8 (T.pack $ nodeProgram nodeSettings)
-    B.writeFile runner ("#!/usr/bin/env " <> T.pack nodePgm <> "\n" <> src)
-    -- FIXME: Jeff (2022,03): set the runner file as an executable in the file system
-    Cabal.setFileExecutable runner
+      nodePgm :: B.ByteString
+      nodePgm = "node" -- XXX we don't read nodeSettings.json anymore, we should somehow know how to find node?
+
+  ---------------------------------------------
+  -- FIXME: Jeff (2022,03): Add support for windows. Detect it and act on it here:
+  -- if Platform.isWindows
+  -- then do
+  --   copyFile (topDir dflags </> "bin" </> "wrapper" <.> "exe")
+  --            runner
+  --   writeFile (runner <.> "options") $ unlines
+  --               [ T.pack nodePgm -- T.pack (nodeProgram nodeSettings)
+  --               , T.pack ("{{EXEPATH}}" </> out </> "all" <.> "js")
+  --               ]
+  -- else do
+  ---------------------------------------------
+  src <- B.readFile (cd </> srcFile)
+  -- let pgm = TE.encodeUtf8 (T.pack $ nodeProgram nodeSettings)
+  B.writeFile runner ("#!/usr/bin/env " <> nodePgm <> "\n" <> src)
+  -- FIXME: Jeff (2022,03): set the runner file as an executable in the file system
+  perms <- getPermissions runner
+  setPermissions runner (perms {executable = True})
 
 -- | write the manifest.webapp file that for firefox os
-writeWebAppManifest :: DynFlags -> FilePath -> IO ()
-writeWebAppManifest df out = do
+writeWebAppManifest :: FilePath -- ^ top directory
+                    -> FilePath -- ^ output directory
+                    -> IO ()
+writeWebAppManifest top out = do
   e <- doesFileExist manifestFile
-  unless e $
-    B.readFile (getLibDir df </> "manifest.webapp") >>= B.writeFile manifestFile
+  unless e $ B.readFile (top </> "manifest.webapp") >>= B.writeFile manifestFile
   where
     manifestFile = out </> "manifest.webapp"
 
@@ -379,11 +399,13 @@ rtsExterns =
                [(7::Int)..16384])
 
 writeExterns :: FilePath -> IO ()
-writeExterns out = writeFile (out </> "all.js.externs") rtsExterns
+writeExterns out = writeFile (out </> "all.js.externs")
+  $ T.unpack rtsExterns -- FIXME: Jeff (2022,03): Why write rtsExterns as
+                        -- ShortText just to unpack?
 
 -- | get all functions in a module
 modFuns :: Deps -> [ExportedFun]
-modFuns (Deps _p _m _r e _b) = M.keys e
+modFuns (Deps _m _r e _b) = M.keys e
 
 -- | get all dependencies for a given set of roots
 getDeps :: Map Module Deps  -- ^ loaded deps
@@ -391,23 +413,22 @@ getDeps :: Map Module Deps  -- ^ loaded deps
         -> Set ExportedFun  -- ^ start here
         -> [LinkableUnit]   -- ^ and also link these
         -> IO (Set LinkableUnit)
-getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun)
+getDeps loaded_deps base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun)
   where
     go :: Set LinkableUnit
        -> Set LinkableUnit
        -> IO (Set LinkableUnit)
     go result open = case S.minView open of
       Nothing -> return result
-      Just (lu@(lpkg,lmod,n), open') ->
-          let key = (lpkg, lmod)
-          in  case M.lookup (lpkg,lmod) lookup of
-                Nothing -> error ("getDeps.go: object file not loaded for:  " ++ show key)
-                Just (Deps _ _ _ _ b) ->
-                  let block = b!n
-                      result' = S.insert lu result
-                  in go' result'
-                         (addOpen result' open' $ map (lpkg,lmod,) (blockBlockDeps block))
-                         (blockFunDeps block)
+      Just (lu@(lmod,n), open') ->
+          case M.lookup lmod loaded_deps of
+            Nothing -> error ("getDeps.go: object file not loaded for:  " ++ show lmod)
+            Just (Deps _ _ _ b) ->
+              let block = b!n
+                  result' = S.insert lu result
+              in go' result'
+                 (addOpen result' open' $
+                   map (lmod,) (blockBlockDeps block)) (blockFunDeps block)
 
     go' :: Set LinkableUnit
         -> Set LinkableUnit
@@ -415,14 +436,14 @@ getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun
         -> IO (Set LinkableUnit)
     go' result open [] = go result open
     go' result open (f:fs) =
-        let key = (funPackage f, funModule f)
-        in  case M.lookup key lookup of
+        let key = funModule f
+        in  case M.lookup key loaded_deps of
               Nothing -> error ("getDeps.go': object file not loaded for:  " ++ show key)
-              Just (Deps _p _m _r e _b) ->
+              Just (Deps _m _r e _b) ->
                  let lun :: Int
                      lun = fromMaybe (error $ "exported function not found: " ++ show f)
                                      (M.lookup f e)
-                     lu  = (funPackage f, funModule f, lun)
+                     lu  = (key, lun)
                  in  go' result (addOpen result open [lu]) fs
 
     addOpen :: Set LinkableUnit -> Set LinkableUnit -> [LinkableUnit]
@@ -433,29 +454,39 @@ getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun
                             S.member s base
       in  open `S.union` S.fromList (filter (not . alreadyLinked) newUnits)
 
+-- FIXME: Jeff: (2022,03): if the order of the [UnitId] list matters after
+-- ghc-prim then we should be using an Ordered Set or something
+-- similar since the implementation of this function uses a lot of
+-- expensive operations on this list and a lot of
+-- serialization/deserialization
+-- FIXME: Jeff (2022,03): Should [UnitId] be [Module]?
 -- | collect dependencies for a set of roots
-collectDeps :: DynFlags
-            -> Map Module (Deps, DepsLocation)
-            -> [UnitId]     -- ^ packages, code linked in this order
-            -> Set LinkableUnit -- ^ do not include these
-            -> Set ExportedFun -- ^ roots
-            -> [LinkableUnit] -- ^ more roots
+collectDeps :: Map Module (Deps, DepsLocation) -- ^ Dependency map
+            -> [UnitId]                        -- ^ packages, code linked in this order
+            -> Set LinkableUnit                -- ^ do not include these
+            -> Set ExportedFun                 -- ^ roots
+            -> [LinkableUnit]                  -- ^ more roots
             -> IO ( Set LinkableUnit
                   , [(Module, JStat, ShortText, [ClosureInfo], [StaticInfo], [ForeignJSRef])]
                   )
-collectDeps _dflags lookup packages base roots units = do
-  allDeps <- getDeps (fmap fst lookup) base roots units
+collectDeps mod_deps packages base roots units = do
+  allDeps <- getDeps (fmap fst mod_deps) base roots units
   -- read ghc-prim first, since we depend on that for static initialization
-  let packages' = uncurry (++) $ partition (== toUnitId primUnitId) (nub packages)
-      unitsByModule :: Map Module IntSet
-      unitsByModule = M.fromListWith IS.union $
-                      map (\(p,m,n) -> ((p,m),IS.singleton n)) (S.toList allDeps)
-      lookupByPkg :: Map Module [(Deps, DepsLocation)]
-      lookupByPkg = M.fromListWith (++) (map (\((p,_m),v) -> (p,[v])) (M.toList lookup))
+  let packages' = uncurry (++) $ partition (== primUnitId) (nub packages)
+
+      units_by_module :: Map Module IntSet
+      units_by_module = M.fromListWith IS.union $
+                      map (\(m,n) -> (m, IS.singleton n)) (S.toList allDeps)
+
+      mod_deps_bypkg :: Map UnitId [(Deps, DepsLocation)]
+      mod_deps_bypkg = M.mapKeys moduleUnitId
+                       $ M.fromListWith (++)
+                        (map (\(m,v) -> (m,[v])) (M.toList mod_deps))
+
   ar_state <- emptyArchiveState
   code <- fmap (catMaybes . concat) . forM packages' $ \pkg ->
-    mapM (uncurry $ extractDeps ar_state unitsByModule)
-         (fromMaybe [] $ M.lookup (mkPackage pkg) lookupByPkg)
+    mapM (uncurry $ extractDeps ar_state units_by_module)
+         (fromMaybe [] $ M.lookup pkg mod_deps_bypkg)
   return (allDeps, code)
 
 extractDeps :: ArchiveState
@@ -464,56 +495,56 @@ extractDeps :: ArchiveState
             -> DepsLocation
             -> IO (Maybe (Module, JStat, ShortText, [ClosureInfo], [StaticInfo], [ForeignJSRef]))
 extractDeps ar_state units deps loc =
-  case M.lookup (pkg, mod) units of
+  case M.lookup mod units of
     Nothing       -> return Nothing
     Just modUnits -> do
       let selector n _  = n `IS.member` modUnits || isGlobalUnit n
       x <- case loc of
         ObjectFile o  -> collectCode =<< readObjectFileKeys selector o
-        ArchiveFile a -> collectCode . readObjectKeys (a ++ ':':T.unpack mod) selector =<<
-                              readArObject ar_state mod a
+        ArchiveFile a -> collectCode
+                        . readObjectKeys (a ++ ':':moduleNameString (moduleName mod)) selector
+                        =<< readArObject ar_state mod a
                             --  error ("Ar.readObject: " ++ a ++ ':' : T.unpack mod))
                             -- Ar.readObject (mkModuleName $ T.unpack mod) a)
-        InMemory n b  -> collectCode $
-                            readObjectKeys n selector (BL.fromStrict b)
+        InMemory n b  -> collectCode $ readObjectKeys n selector b
       evaluate (rnf x)
       return x
   where
-    pkg           = depsPackage deps
     mod           = depsModule deps
-    collectCode l = let x = ( pkg
-                            , mod
+    -- FIXME: Jeff (2022,03): remove this hacky reimplementation of unlines
+    newline       = T.pack "\n"
+    unlines'      = intersperse newline . map oiRaw
+    collectCode l = let x = ( mod
                             , mconcat (map oiStat l)
-                            , unlines (map oiRaw l)
+                            , mconcat (unlines' l)
                             , concatMap oiClInfo l
                             , concatMap oiStatic l
                             , concatMap oiFImports l)
                     in evaluate (rnf x) >> return (Just x)
 
-readArObject :: ArchiveState -> ShortText -> FilePath -> IO BL.ByteString
-readArObject ar_state mod_name ar_file = do
+readArObject :: ArchiveState -> Module -> FilePath -> IO BL.ByteString
+readArObject ar_state mod ar_file = do
   loaded_ars <- readIORef (loadedArchives ar_state)
-  ar@(Ar.Archive entries) <- case M.lookup ar_file loaded_ars of
+  (Ar.Archive entries) <- case M.lookup ar_file loaded_ars of
     Just a -> pure a
     Nothing -> do
       a <- Ar.loadAr ar_file
       modifyIORef (loadedArchives ar_state) (M.insert ar_file a)
       pure a
-  let tag = moduleNameTag mod_name
+  let tag = moduleNameTag $ moduleName mod
       matchTag entry
         | Right hdr <- getHeader (BL.fromStrict $ Ar.filedata entry)
         = hdrModuleName hdr == tag
-        | otherwise = False
+        | otherwise
+        = False
 
   -- XXX this shouldn't be an exception probably    
-  pure $ maybe (error $ "could not find object for module " ++ T.unpack mod_name ++ " in " ++ ar_file) (BL.fromStrict . Ar.filedata) (find matchTag entries)
+  pure $ maybe (error $ "could not find object for module "
+                ++ moduleNameString (moduleName mod)
+                ++ " in "
+                ++ ar_file)
+                (BL.fromStrict . Ar.filedata) (find matchTag entries)
   -- mapM_ (\e -> putStrLn ("found file: " ++ Ar.filename e)) entries
-
-mkPackage :: UnitId -> Module
-mkPackage pk = Package (T.pack $ installedUnitIdString pk)
-
-toPackageKey :: Module -> UnitId
-toPackageKey = stringToUnitId . T.unpack . unPackage
 
 {- | Static dependencies are symbols that need to be linked regardless
      of whether the linked program refers to them. For example
@@ -521,7 +552,7 @@ toPackageKey = stringToUnitId . T.unpack . unPackage
      refers to directly
  -}
 newtype StaticDeps =
-  StaticDeps { unStaticDeps :: [(ShortText, ShortText, ShortText)] -- package/module/symbol
+  StaticDeps { unStaticDeps :: [(ShortText, ShortText)] -- module/symbol
              }
 
 noStaticDeps :: StaticDeps
@@ -552,45 +583,44 @@ noStaticDeps = StaticDeps []
 --   parseJSON _          = mempty
 
 -- | dependencies for the RTS, these need to be always linked
-rtsDeps :: DynFlags -> [UnitId] -> IO ([UnitId], Set ExportedFun)
-rtsDeps dflags pkgs = readSystemDeps dflags pkgs
-                                "RTS"
-                                "linking"
-                                "rtsdeps.yaml"
+rtsDeps :: HscEnv -> [UnitId] -> IO ([UnitId], Set ExportedFun)
+rtsDeps hsc_env pkgs = readSystemDeps hsc_env pkgs "rtsdeps.yaml"
 
 -- | dependencies for the Template Haskell, these need to be linked when running
 --   Template Haskell (in addition to the RTS deps)
-thDeps :: DynFlags -> [UnitId] -> IO ([UnitId], Set ExportedFun)
-thDeps dflags pkgs = readSystemDeps dflags pkgs
-                               "Template Haskell"
-                               "running Template Haskell"
-                               "thdeps.yaml"
+thDeps :: HscEnv -> [UnitId] -> IO ([UnitId], Set ExportedFun)
+thDeps hsc_env pkgs = readSystemDeps hsc_env pkgs "thdeps.yaml"
 
-readSystemDeps :: DynFlags
-               -> [UnitId]
-               -> String
-               -> String
-               -> FilePath
+-- FIXME: Jeff (2022,03): fill in the ?
+-- | A helper function to read system dependencies that are hardcoded via a file
+-- path.
+readSystemDeps :: HscEnv      -- ^ HS Env
+               -> [UnitId]    -- ^ Packages to ??
+               -> FilePath    -- ^ File to read
                -> IO ([UnitId], Set ExportedFun)
-readSystemDeps dflags pkgs depsName requiredFor file = do
-  (deps_pkgs, deps_funs) <- readSystemDeps' dflags depsName requiredFor file
+readSystemDeps hsc_env pkgs file = do
+  (deps_pkgs, deps_funs) <- readSystemDeps' hsc_env file
   pure ( filter (`S.member` linked_pkgs) deps_pkgs
-       , S.filter (\fun -> funPackage fun `S.member` linked_pkgs_pkg) deps_funs
+       , S.filter (\fun ->
+                     moduleUnitId (funModule fun) `S.member` linked_pkgs) deps_funs
        )
 
   where
+    -- FIXME: Jeff (2022,03): Each time we _do not_ use a list like a stack we
+    -- gain evidence that we should be using a different data structure. @pkgs@
+    -- is the list in question here
     linked_pkgs     = S.fromList pkgs
-    linked_pkgs_pkg = S.fromList (map (Package . T.pack . installedUnitIdString) pkgs)
 
 
-readSystemDeps' :: DynFlags
-               -> String
-               -> String
+readSystemDeps' :: HscEnv
                -> FilePath
                -> IO ([UnitId], Set ExportedFun)
-readSystemDeps' dflags depsName requiredFor file
+readSystemDeps' hsc_env file
   -- hardcode contents to get rid of yaml dep
   -- XXX move runTHServer to some suitable wired-in package
+  -- FIXME: Jeff (2022,03): Use types not string matches, These should be
+  -- wired-in just like in GHC and thus we should make them top level
+  -- definitions
   | file == "thdeps.yaml" = pure ( [stringToUnitId "base"]
                                  , S.fromList $ d "base" "GHCJS.Prim.TH.Eval" ["runTHServer"])
   | file == "rtsdeps.yaml" = pure ( [stringToUnitId "base"
@@ -613,12 +643,17 @@ readSystemDeps' dflags depsName requiredFor file
                                   , d "base" "GHCJS.Prim.Internal" ["wouldBlock", "blockedIndefinitelyOnMVar", "blockedIndefinitelyOnSTM", "ignoreException", "setCurrentThreadResultException", "setCurrentThreadResultValue"]
                                   ]
                                   )
-  | otherwise = pure ([], mempty)
+  | otherwise = pure (mempty, mempty)
   where
-    d pkg m syms = map (ExportedFun (Package $ T.pack pkg) m . mkHaskellSym (stringToUnitId pkg) m) syms
+    d pkg mod symbols = map (ExportedFun pkg . mkHaskellSym pkg mod) symbols
     zenc  = T.pack . zEncodeString . T.unpack
-    mkHaskellSym :: UnitId -> ShortText -> ShortText -> ShortText
-    mkHaskellSym p m s = "h$" <> zenc (T.pack (encodeUnitId dflags p) <> ":" <> m <> "." <> s)
+
+    mkHaskellSym :: Module -> ShortText -> ShortText -> ShortText
+    mkHaskellSym mod m s = "h$" <> zenc (T.pack (encodeModule hsc_env mod)
+                                       <> ":"
+                                       <> m
+                                       <> "."
+                                       <> s)
 
 {-
   b  <- readBinaryFile (getLibDir dflags </> file)
@@ -639,7 +674,7 @@ readSystemDeps' dflags depsName requiredFor file
 
 -}
 
-readSystemWiredIn :: DynFlags -> IO [(ShortText, UnitId)]
+readSystemWiredIn :: HscEnv -> IO [(ShortText, UnitId)]
 readSystemWiredIn _ = pure [] -- XXX
 {-
 readSystemWiredIn dflags = do
@@ -662,54 +697,74 @@ readSystemWiredIn dflags = do
      will all come from the same version, but it's undefined which one.
  -}
 
-type SDep = (ShortText, ShortText, ShortText)
+type SDep = (ShortText, ShortText) -- ^ module/symbol
 
-staticDeps :: DynFlags
-           -> [(ShortText, UnitId)]    -- ^ wired-in package names / keys
+staticDeps :: HscEnv
+           -> [(ShortText, Module)]   -- ^ wired-in package names / keys
            -> StaticDeps              -- ^ deps from yaml file
-           -> (StaticDeps, [UnitId], Set ExportedFun)
+           -> (StaticDeps, Set UnitId, Set ExportedFun)
                                       -- ^ the StaticDeps contains the symbols
                                       --   for which no package could be found
-staticDeps dflags wiredin sdeps = mkDeps sdeps
+staticDeps hsc_env wiredin sdeps = mkDeps sdeps
   where
     zenc  = T.pack . zEncodeString . T.unpack
+    u_st  = ue_units $ hsc_unit_env hsc_env
     mkDeps (StaticDeps ds) =
+      -- FIXME: Jeff (2022,03): this foldl' will leak memory due to the tuple
+      -- and in the list in the fst position because the list is neither spine
+      -- nor value strict. So the WHNF computed by foldl' will by a 3-tuple with
+      -- 3 thunks and the WHNF for the list will be a cons cell
       let (u, p, r) = foldl' resolveDep ([], S.empty, S.empty) ds
-      in  (StaticDeps u, S.toList (closePackageDeps dflags p), r)
+      in  (StaticDeps u, closePackageDeps u_st p, r)
     resolveDep :: ([SDep], Set UnitId, Set ExportedFun)
                -> SDep
                -> ([SDep], Set UnitId, Set ExportedFun)
-    resolveDep (unresolved, pkgs, resolved) dep@(p, m, s) =
-      case lookup p wiredin of
+    resolveDep (unresolved, pkgs, resolved) dep@(mod_name, s) =
+      -- lookup our module in wiredin names
+      case lookup mod_name wiredin of
+             -- we didn't find the module in wiredin so add to unresolved
              Nothing -> ( dep : unresolved, pkgs, resolved)
-             Just k  -> case lookupUnitId dflags k of
-               Nothing -> error $ "Package key for wired-in dependency `" ++
-                                  T.unpack p ++ "' could not be found: "  ++
-                                  installedUnitIdString k
-               Just conf ->
-                 let k' = unitId conf
-                 in  ( unresolved
-                     , S.insert k' pkgs
-                     , S.insert (ExportedFun (mkPackage k') m $ mkSymb k' m s)
-                                resolved
-                     )
-    mkSymb :: UnitId -> ShortText -> ShortText -> ShortText
+             -- this is a wired in module
+             Just mod  ->
+               let mod_uid = moduleUnitId mod
+               in case lookupUnitId u_st mod_uid of
+                 -- couldn't find the uid for this wired in package so explode
+                 Nothing -> pprPanic ("Package key for wired-in dependency could not be found.`"
+                                     ++ "I looked for: "
+                                     ++ T.unpack mod_name
+                                     ++ " receieved " ++ moduleNameString (moduleName mod)
+                                     ++ " but could not find: " ++ show mod_uid
+                                     ++ " in the UnitState."
+                                     ++ " Here is too much info for you: ")
+                            $ vcat [ppr mod, ppr u_st]
+                 -- we are all good, add the uid to the package set, construct
+                 -- its symbols on the fly and add the module to exported symbol
+                 -- set
+                 Just _ -> ( unresolved
+                           , S.insert mod_uid pkgs
+                           , S.insert (ExportedFun mod
+                                       $ mkSymb mod mod_name s) resolved
+                           )
+    -- confusingly with the new ghc api we now use Module where we formerly had
+    -- Package, so this becomes Module -> Module -> Symbol where the first
+    -- Module is GHC's module type and the second is the SDep Moudle read as a
+    -- ShortText
+    -- FIXME: Jeff (2022,03): should mkSymb be in the UnitUtils?
+    mkSymb :: Module -> ShortText -> ShortText -> ShortText
     mkSymb p m s  =
-      "h$" <> zenc (T.pack (encodeUnitId dflags p) <> ":" <> m <> "." <> s)
+      "h$" <> zenc (T.pack (encodeModule hsc_env p) <> ":" <> m <> "." <> s)
 
-closePackageDeps :: DynFlags -> Set UnitId -> Set UnitId
-closePackageDeps dflags pkgs
+closePackageDeps :: UnitState -> Set UnitId -> Set UnitId
+closePackageDeps u_st pkgs
   | S.size pkgs == S.size pkgs' = pkgs
-  | otherwise                   = closePackageDeps dflags pkgs'
+  | otherwise                   = closePackageDeps u_st pkgs'
   where
     pkgs' = pkgs `S.union` S.fromList (concatMap deps $ S.toList pkgs)
     notFound = error "closePackageDeps: package not found"
     deps :: UnitId -> [UnitId]
-    deps =
---           map (Packages.resolveInstalledPackageId dflags)
-           depends
+    deps = unitDepends
          . fromMaybe notFound
-         . lookupUnitId dflags
+         . lookupUnitId u_st
 
 -- read all dependency data from the to-be-linked files
 loadObjDeps :: [LinkedObj] -- ^ object files to link
@@ -734,7 +789,7 @@ loadArchiveDeps' :: [FilePath]
                        )
 loadArchiveDeps' archives = do
   archDeps <- forM archives $ \file -> do
-    ar@(Ar.Archive entries) <- Ar.loadAr file
+    (Ar.Archive entries) <- Ar.loadAr file
     pure (mapMaybe (readEntry file) entries)
   return (prepareLoadedDeps $ concat archDeps)
     where
@@ -756,20 +811,17 @@ prepareLoadedDeps :: [(Deps, DepsLocation)]
                      )
 prepareLoadedDeps deps =
   let req     = concatMap (requiredUnits . fst) deps
-      depsMap = M.fromList $ map (\d -> ((depsPackage (fst d)
-                                         ,depsModule (fst d)), d))
-                                 deps
+      depsMap = M.fromList $ map (\d -> (depsModule (fst d), d)) deps
   in  (depsMap, req)
 
 requiredUnits :: Deps -> [LinkableUnit]
-requiredUnits d = map (depsPackage d, depsModule d,)
-                      (IS.toList $ depsRequired d)
+requiredUnits d = map (depsModule d,) (IS.toList $ depsRequired d)
 
 -- read dependencies from an object that might have already been into memory
 -- pulls in all Deps from an archive
 readDepsFile' :: LinkedObj -> IO (Deps, DepsLocation)
 readDepsFile' (ObjLoaded name bs) = pure . (,InMemory name bs) $
-                                    readDeps name (BL.fromStrict bs)
+                                    readDeps name bs
 readDepsFile' (ObjFile file)      =
   (,ObjectFile file) <$> readDepsFile file
 

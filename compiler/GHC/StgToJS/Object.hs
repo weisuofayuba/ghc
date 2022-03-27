@@ -137,7 +137,7 @@ data Deps = Deps
   { depsModule          :: !Module                 -- ^ module
   , depsRequired        :: !IntSet                 -- ^ blocks that always need to be linked when this object is loaded (e.g. everything that contains initializer code or foreign exports)
   , depsHaskellExported :: !(Map ExportedFun Int)  -- ^ exported Haskell functions -> block
-  , depsBlocks          :: !(Array Int  BlockDeps) -- ^ info about each block
+  , depsBlocks          :: !(Array Int BlockDeps)  -- ^ info about each block
   } deriving (Generic)
 
 -- | Where are the dependencies
