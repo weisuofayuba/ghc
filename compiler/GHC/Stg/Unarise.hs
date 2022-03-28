@@ -260,7 +260,7 @@ import GHC.Types.RepType
 import GHC.Stg.Syntax
 import GHC.Stg.Utils
 import GHC.Core.Type
-import GHC.Builtin.Types.Prim (intPrimTy)
+import GHC.Builtin.Types.Prim (intPrimTy, primRepToRuntimeRep)
 import GHC.Builtin.Types
 import GHC.Types.Unique.Supply
 import GHC.Utils.Misc
@@ -434,8 +434,9 @@ unariseRubbish_maybe (LitRubbish rep)
   = Nothing   -- Single, non-void PrimRep. Nothing to do!
 
   | otherwise -- Multiple reps, possibly with VoidRep. Eliminate via elimCase
-  = Just [ StgLitArg (LitRubbish (primRepToType prep))
+  = Just [ StgLitArg (LitRubbish (primRepToRuntimeRep prep))
          | prep <- preps, not (isVoidRep prep) ]
+
   where
     preps = runtimeRepPrimRep (text "unariseRubbish_maybe") rep
 
