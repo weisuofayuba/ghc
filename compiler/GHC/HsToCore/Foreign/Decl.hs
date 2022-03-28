@@ -154,7 +154,9 @@ dsFImport :: Id
           -> ForeignImport
           -> DsM ([Binding], CHeader, CStub)
 dsFImport id co (CImport cconv safety mHeader spec _) =
-    dsCImport id co spec (unLoc cconv) (unLoc safety) mHeader
+  case unLoc cconv of
+    JavaScriptCallConv -> dsJsImport id co spec (unLoc cconv) (unLoc safety) mHeader
+    _                  -> dsCImport  id co spec (unLoc cconv) (unLoc safety) mHeader
 
 dsCImport :: Id
           -> Coercion
@@ -201,6 +203,18 @@ fun_type_arg_stdcall_info platform StdCallConv ty
     in Just $ sum (map (widthInBytes . typeWidth . typeCmmType platform . getPrimTyOf) fe_arg_tys)
 fun_type_arg_stdcall_info _ _other_conv _
   = Nothing
+
+dsJsImport
+  :: Id
+  -> Coercion
+  -> CImportSpec
+  -> CCallConv
+  -> Safety
+  -> Maybe Header
+  -> DsM ([Binding], CHeader, CStub)
+dsJsImport id co spec cconv safety mHeader =
+  -- FIXME (Sylvain 2022-03-28): adapt code from GHCJS
+  dsCImport id co spec cconv safety mHeader
 
 {-
 ************************************************************************

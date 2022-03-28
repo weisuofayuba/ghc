@@ -324,6 +324,10 @@ tcCheckFIType arg_tys res_ty idecl@(CImport (L lc cconv) (L ls safety) mh
       -- prim import result is more liberal, allows (#,,#)
       checkForeignRes nonIOok checkSafe (isFFIPrimResultTy dflags) res_ty
       return idecl
+  | cconv == JavaScriptCallConv = do
+      checkCg checkJS
+      -- leave the rest to the JS backend (at least for now)
+      return idecl
   | otherwise = do              -- Normal foreign import
       checkCg checkCOrAsmOrLlvmOrInterp
       cconv' <- checkCConv cconv
@@ -521,6 +525,12 @@ checkCOrAsmOrLlvmOrInterp LLVM        = IsValid
 checkCOrAsmOrLlvmOrInterp Interpreter = IsValid
 checkCOrAsmOrLlvmOrInterp _
   = NotValid (text "requires interpreted, unregisterised, llvm or native code generation")
+
+-- | Checking a JS backend is in use
+checkJS :: Backend -> Validity
+checkJS JavaScript  = IsValid
+checkJS _
+  = NotValid (text "requires a JavaScript code generator")
 
 checkCg :: (Backend -> Validity) -> TcM ()
 checkCg check = do
