@@ -11,6 +11,7 @@
 -- Maintainer  :  Jeffrey Young  <jeffrey.young@iohk.io>
 --                Luite Stegeman <luite.stegeman@iohk.io>
 --                Sylvain Henry  <sylvain.henry@iohk.io>
+--                Josh Meredith  <josh.meredith@iohk.io>
 -- Stability   :  experimental
 --
 -- GHCJS linker, collects dependencies from the object files (.js_o, js_p_o),
@@ -27,6 +28,7 @@
 module GHC.StgToJS.Linker.Linker where
 
 import           GHC.StgToJS.Linker.Types
+import           GHC.StgToJS.Linker.Utils
 
 import           GHC.JS.Syntax
 
@@ -316,12 +318,15 @@ getShims = panic "Panic from getShims: Shims not implemented! no to shims!"
 {- | convenience: combine rts.js, lib.js, out.js to all.js that can be run
      directly with node.js or SpiderMonkey jsshell
  -}
-combineFiles :: JSLinkConfig -> FilePath -> IO ()
-combineFiles cfg fp = do
+combineFiles :: JSLinkConfig
+             -> FilePath      -- ^ top level dir
+             -> FilePath
+             -> IO ()
+combineFiles cfg top fp = do
   files   <- mapM (B.readFile.(fp</>)) ["rts.js", "lib.js", "out.js"]
   runMain <- if   lcNoHsMain cfg
              then pure mempty
-             else B.readFile (getLibDir dflags </> "runmain.js")
+             else B.readFile (top </> "runmain.js")
   writeBinaryFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 -- | write the index.html file that loads the program if it does not exit
@@ -349,13 +354,12 @@ writeRunMain top out = do
 
 -- FIXME: Jeff (2022,03): Use Newtypes instead of Strings for these directories
 writeRunner :: JSLinkConfig -- ^ Settings
-            -> FilePath     -- ^ Top level directory
             -> FilePath     -- ^ Output directory
             -> IO ()
-writeRunner settings dflags out =
+writeRunner _settings out =
   -- FIXME: Jeff (2022,03): why was the buildRunner check removed? If we don't
   -- need to check then does the flag need to exist?
-  {-when (lcBuildRunner settings) $ -} do
+  {-when (lcBuildRunner _settings) $ -} do
   cd    <- getCurrentDirectory
   let runner  = cd </> addExeExtension (dropExtension out)
       srcFile = out </> "all" <.> "js"

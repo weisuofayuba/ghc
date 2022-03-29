@@ -399,7 +399,7 @@ readDepsEither name bs =
 
 
 -- | call with contents of the file
-readDeps :: String -> ByteString -> Deps
+readDeps :: String -> B.ByteString -> Deps
 readDeps name bs =
   case readDepsEither name bs of
     Left err -> error ("readDeps: not a valid GHCJS object: " ++ name ++ "\n   " ++ err)

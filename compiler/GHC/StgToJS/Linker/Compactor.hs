@@ -11,6 +11,7 @@
 -- Maintainer  :  Jeffrey Young  <jeffrey.young@iohk.io>
 --                Luite Stegeman <luite.stegeman@iohk.io>
 --                Sylvain Henry  <sylvain.henry@iohk.io>
+--                Josh Meredith  <josh.meredith@iohk.io>
 -- Stability   :  experimental
 --
 -- The compactor does link-time optimization. It is much simpler than the
