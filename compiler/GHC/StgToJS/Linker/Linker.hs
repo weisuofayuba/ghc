@@ -51,6 +51,7 @@ import           GHC.Unit.Module ( UnitId
                                  , Module
                                  , moduleUnitId
                                  , primUnitId, moduleNameString
+                                 , moduleStableString
                                  )
 import           GHC.Data.ShortText       (ShortText)
 import qualified GHC.Data.ShortText       as T
@@ -270,19 +271,28 @@ renderLinker settings renamerState rtsDeps code =
 linkerStats :: Int64         -- ^ code size of packed metadata
             -> LinkerStats   -- ^ code size per module
             -> ShortText
-linkerStats meta s =
+linkerStats meta s = T.pack $
   intercalate "\n\n" [packageStats, moduleStats, metaStats] <> "\n\n"
   where
-    ps = M.fromListWith (+) . map (\((p,_),s) -> (p,s)) . M.toList $ s
+    ps = M.fromListWith (+) . map (\(m,s) -> (moduleName m,s)) . M.toList $ s
     pad n t = let l = length t
               in  if l < n then t <> replicate (n-l) " " else t
-    pkgMods = groupBy ((==) `on` fst . fst) (M.toList s)
-    showMod ((_,m),s) = pad 40 ("    " <> show m <> ":") <> show s
+
+    pkgMods :: [[(Module,Int64)]]
+    pkgMods = groupBy ((==) `on` fst) (M.toList s)
+
+    showMod :: (Module, Int64) -> String
+    showMod (m,s) = pad 40 ("    " <> moduleStableString m <> ":") <> show s
+
+    packageStats :: String
     packageStats = "code size summary per package:\n\n"
-                   <> map (\(p,s) -> pad 25 (showPkg p <> ":") <> show s) $ M.toList ps
-    moduleStats = "code size per module:\n\n" <> unlines
-      (map (\xs@(((p,_),_):_) -> showPkg p <> "\n" <> unlines (map showMod xs)) pkgMods)
-    metaStats = "packed metadata: " <> T.pack (show meta)
+                   <> concatMap (\(p,s) -> pad 25 (show p <> ":") <> show s) $ M.toList ps
+
+    moduleStats :: String
+    moduleStats = "code size per module:\n\n" <> unlines (map (concatMap showMod) pkgMods)
+
+    metaStats :: String
+    metaStats = "packed metadata: " <> show meta
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` ("/\\"::String))) . splitPath
