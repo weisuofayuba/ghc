@@ -38,6 +38,7 @@ import GHC.StgToJS.Apply
 import GHC.StgToJS.Closure
 import GHC.StgToJS.Heap
 import GHC.StgToJS.Monad
+import GHC.StgToJS.Printer
 import GHC.StgToJS.Profiling
 import GHC.StgToJS.Regs
 import GHC.StgToJS.Types
@@ -379,6 +380,9 @@ rtsDecls = jsSaturate (Just "h$RTSD") $
           -- stg registers
           , declRegs
           , declRets]
+
+rtsText :: StgToJSConfig -> T.ShortText
+rtsText = T.pack . show . pretty . rts
 
 rts :: StgToJSConfig -> JStat
 rts = jsSaturate (Just "h$RTS") . rts'

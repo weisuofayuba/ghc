@@ -29,12 +29,14 @@ module GHC.StgToJS.Linker.Linker where
 
 import           GHC.StgToJS.Linker.Types
 import           GHC.StgToJS.Linker.Utils
+import           GHC.StgToJS.Rts.Rts
 
 import           GHC.JS.Syntax
 
 import           GHC.StgToJS.Object
 import           GHC.StgToJS.Types hiding (LinkableUnit)
 import           GHC.StgToJS.UnitUtils
+import           GHC.StgToJS.Printer
 
 import qualified GHC.SysTools.Ar          as Ar
 import           GHC.Utils.Encoding
@@ -281,18 +283,6 @@ linkerStats meta s =
     moduleStats = "code size per module:\n\n" <> unlines
       (map (\xs@(((p,_),_):_) -> showPkg p <> "\n" <> unlines (map showMod xs)) pkgMods)
     metaStats = "packed metadata: " <> T.pack (show meta)
-
-rtsText :: StgToJSConfig -> ShortText
-rtsText cfg = (<> newline) . rts cfg
-  where newline = T.pack "\n"
-
-rtsText' :: StgToJSConfig -> ShortText
-rtsText' = rtsText
-{- prerender RTS for faster linking (FIXME this results in a build error, why?)
-rtsText' debug = if debug
-                   then TL.pack $ $(runQ $ litE (StringL . TL.unpack . rtsText $ True))
-                   else TL.pack $ $(runQ $ litE (StringL . TL.unpack . rtsText $ False))
--}
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` ("/\\"::String))) . splitPath
