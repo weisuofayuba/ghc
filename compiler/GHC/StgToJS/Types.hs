@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
@@ -29,6 +30,8 @@ import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.ByteString as BS
 import Data.Monoid
+import Data.Typeable (Typeable)
+import GHC.Generics (Generic)
 
 type G = State GenState
 
@@ -79,14 +82,14 @@ data ClosureInfo = ClosureInfo
   , ciType    :: CIType    -- ^ type of the object, with extra info where required
   , ciStatic  :: CIStatic  -- ^ static references of this object
   }
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord, Show)
 
 data CIRegs
   = CIRegsUnknown
   | CIRegs { ciRegsSkip  :: Int       -- ^ unused registers before actual args start
            , ciRegsTypes :: [VarType] -- ^ args
            }
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord, Show)
 
 data CILayout
   = CILayoutVariable            -- layout stored in object itself, first position from the start
@@ -97,7 +100,7 @@ data CILayout
       { layoutSize :: !Int      -- closure size in array positions, including entry
       , layout     :: [VarType]
       }
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord, Show)
 
 data CIType
   = CIFun { citArity :: !Int  -- ^ function arity
@@ -108,15 +111,12 @@ data CIType
   | CIPap
   | CIBlackhole
   | CIStackFrame
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord, Show)
 
 -- | Static references that must be kept alive
 newtype CIStatic = CIStaticRefs { staticRefs :: [ShortText] }
   deriving stock   (Eq, Ord)
-  deriving newtype (Semigroup, Monoid)
-
--- TODO: Jeff (2022,03): Make ToJExpr derivable? will need Default Signatures
--- and depends on the increase in compilation time
+  deriving newtype (Semigroup, Monoid, Show)
 
 -- | static refs: array = references, null = nothing to report
 --   note: only works after all top-level objects have been created
@@ -136,7 +136,7 @@ data VarType
   | RtsObjV  -- some RTS object from GHCJS (for example TVar#, MVar#, MutVar#, Weak#)
   | ObjV     -- some JS object, user supplied, be careful around these, can be anything
   | ArrV     -- boxed array
-  deriving (Eq, Ord, Enum, Bounded)
+  deriving (Eq, Ord, Enum, Bounded, Show)
 
 instance ToJExpr VarType where
   toJExpr = toJExpr . fromEnum
@@ -172,7 +172,7 @@ data StaticInfo = StaticInfo
   { siVar    :: !ShortText     -- ^ global object
   , siVal    :: !StaticVal     -- ^ static initialization
   , siCC     :: !(Maybe Ident) -- ^ optional CCS name
-  }
+  } deriving stock (Eq, Ord, Show, Typeable, Generic)
 
 data StaticVal
   = StaticFun     !ShortText   [StaticArg]
@@ -186,7 +186,7 @@ data StaticVal
     -- ^ regular datacon app
   | StaticList    [StaticArg] (Maybe ShortText)
     -- ^ list initializer (with optional tail)
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord, Show)
 
 data StaticUnboxed
   = StaticUnboxedBool         !Bool
@@ -194,13 +194,13 @@ data StaticUnboxed
   | StaticUnboxedDouble       !SaneDouble
   | StaticUnboxedString       !BS.ByteString
   | StaticUnboxedStringOffset !BS.ByteString
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord, Show)
 
 data StaticArg
   = StaticObjArg !ShortText             -- ^ reference to a heap object
   | StaticLitArg !StaticLit             -- ^ literal
   | StaticConArg !ShortText [StaticArg] -- ^ unfloated constructor
-  deriving (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show)
 
 instance Outputable StaticArg where
   ppr x = text (show x)
@@ -217,6 +217,16 @@ data StaticLit
 
 instance Outputable StaticLit where
   ppr x = text (show x)
+
+
+instance ToJExpr StaticLit where
+  toJExpr (BoolLit b)           = toJExpr b
+  toJExpr (IntLit i)            = toJExpr i
+  toJExpr NullLit               = null_
+  toJExpr (DoubleLit d)         = toJExpr (unSaneDouble d)
+  toJExpr (StringLit t)         = app (pack "h$str") [toJExpr t]
+  toJExpr (BinLit b)            = app (pack "h$rstr") [toJExpr (map toInteger (BS.unpack b))]
+  toJExpr (LabelLit _isFun lbl) = var lbl
 
 data ForeignJSRef = ForeignJSRef
   { foreignRefSrcSpan  :: !ShortText

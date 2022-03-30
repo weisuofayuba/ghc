@@ -29,7 +29,6 @@ module GHC.StgToJS.Linker.Linker where
 
 import           GHC.StgToJS.Linker.Types
 import           GHC.StgToJS.Linker.Utils
-import           GHC.StgToJS.Rts.Rts
 
 import           GHC.JS.Syntax
 
@@ -132,7 +131,7 @@ link logger dflags env settings out include pkgs objFiles jsFiles isRootFun extr
   | lcNoJSExecutables settings = return ()
   | otherwise = do
       LinkResult lo lstats lmetasize lfrefs llW lla llarch lbase <-
-        link' dflags env settings out include pkgs objFiles jsFiles
+        link' logger env settings out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
       let genBase = isJust (lcGenBase settings)
           jsExt | genBase   = "base.js"
@@ -257,14 +256,14 @@ renderLinker settings renamerState rtsDeps code =
   let
     -- TODO: Jeff (2022,03): implement the Compactor
     -- (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,_,ci,si,_) -> (s,ci,si)) code)
-      pe = (<>"\n") . displayT . renderPretty 0.8 150 . pretty
-      rendered  = parMap rdeepseq pe compacted
+      pe = (<>"\n") . pretty
+      rendered  = fmap pe compacted
       renderedMeta = pe meta
       renderedExports = unlines . filter (not . T.null) $ map (\(_,_,_,rs,_,_,_) -> rs) code
-      mkStat (p,m,_,_,_,_,_) b = ((p,m), BL.length b)
+      mkStat (m,_,_,_,_,_) b = (m, BL.length b)
   in ( mconcat rendered <> renderedMeta <> renderedExports
      , BL.length renderedMeta
-     , renamerState'
+     , renamerState
      , M.fromList $ zipWith mkStat code rendered
      )
 

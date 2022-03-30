@@ -45,6 +45,7 @@ module GHC.StgToJS.Linker.Types where
 
 import           GHC.JS.Syntax
 import           GHC.StgToJS.Object
+import           GHC.StgToJS.Types (ClosureInfo, StaticInfo)
 
 import           GHC.Unit.Types
 import           GHC.Utils.Panic
@@ -92,6 +93,9 @@ renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) newLocals
 -- CompactorState
 --------------------------------------------------------------------------------
 
+-- FIXME: Jeff (2022,03): These maps should be newtyped so we cannot confuse
+-- them and thus accidently construct hard to understand bugs. When we newtype
+-- we should use deriving via to avoid boilerplate
 data CompactorState = CompactorState
   { csIdentSupply   :: [Ident]                  -- ^ ident supply for new names
   , csNameMap       :: !(M.Map ShortText Ident) -- ^ renaming mapping for internal names
@@ -242,6 +246,48 @@ makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls sts)
                    (M.union (fmap (+nls) pls) ls)
                    sts
 
+-- Helper functions used in Linker.Compactor. We live with some redundant code
+-- to avoid the lens mayhem in Gen2 GHCJS. TODO: refactor to avoid redundant
+-- code
+addStaticEntry :: ShortText      -- ^ The static entry to add
+               -> CompactorState -- ^ the old state
+               -> CompactorState -- ^ the new state
+addStaticEntry new cs =
+  -- check if we have seen new before
+  let cur_statics = csStatics cs
+      go          = M.lookup new cur_statics >> M.lookup new (csParentStatics cs)
+  in case go of
+    Just _  -> cs                      -- we have so return
+    Nothing -> let cnt = csNumStatics cs -- we haven't so do the business
+                   newStatics = M.insert new cnt cur_statics
+                   newCnt = cnt + 1
+               in cs {csStatics = newStatics, csNumStatics = newCnt}
+
+addEntry :: ShortText      -- ^ The entry function to add
+         -> CompactorState -- ^ the old state
+         -> CompactorState -- ^ the new state
+addEntry new cs =
+  let cur_entries = csEntries cs
+      go          = M.lookup new cur_entries >> M.lookup new (csParentEntries cs)
+  in case go of
+    Just _  -> cs
+    Nothing -> let cnt = csNumEntries cs
+                   newEntries = M.insert new cnt cur_entries
+                   newCnt = cnt + 1
+               in cs {csEntries = newEntries, csNumEntries = newCnt}
+
+addLabel :: ShortText      -- ^ The label to add
+         -> CompactorState -- ^ the old state
+         -> CompactorState -- ^ the new state
+addLabel new cs =
+  let cur_lbls = csLabels cs
+      go          = M.lookup new cur_lbls >> M.lookup new (csParentLabels cs)
+  in case go of
+    Just _  -> cs
+    Nothing -> let cnt = csNumLabels cs
+                   newLabels = M.insert new cnt cur_lbls
+                   newCnt = cnt + 1
+               in cs {csEntries = newLabels, csNumLabels = newCnt}
 --------------------------------------------------------------------------------
 -- Base
 --------------------------------------------------------------------------------
@@ -464,6 +510,8 @@ instance Semigroup JSLinkConfig where
 -- FIXME: Jeff: (2022,03): Refactor to avoid name collision between
 -- StgToJS.Linker.Types.LinkableUnit and StgToJS.Types.LinkableUnit
 type LinkableUnit = (Module, Int)
+
+type LinkedUnit = (JStat, [ClosureInfo], [StaticInfo])
 
 -- TODO: Jeff: (2022,03):  Where to move LinkedObj
 -- | An object file that's either already in memory (with name) or on disk
