@@ -29,6 +29,9 @@ module GHC.StgToJS.Linker.Linker where
 
 import           GHC.StgToJS.Linker.Types
 import           GHC.StgToJS.Linker.Utils
+import           GHC.StgToJS.Linker.Compactor
+
+import           GHC.StgToJS.Rts.Rts
 
 import           GHC.JS.Syntax
 
@@ -39,19 +42,16 @@ import           GHC.StgToJS.Printer
 
 import qualified GHC.SysTools.Ar          as Ar
 import           GHC.Utils.Encoding
-import           GHC.Utils.Outputable (ppr, vcat)
+import           GHC.Utils.Outputable (ppr, vcat, text)
 import           GHC.Utils.Panic
 import           GHC.Unit.State
 import           GHC.Unit.Env
+import           GHC.Unit.Home
 import           GHC.Unit.Types
-import           GHC.Utils.Logger
+import           GHC.Utils.Error
+import           GHC.Platform.Ways
 import           GHC.Driver.Env.Types
-import           GHC.Unit.Module ( UnitId
-                                 , Module
-                                 , moduleUnitId
-                                 , primUnitId, moduleNameString
-                                 , moduleStableString
-                                 )
+import           GHC.Unit.Module ( moduleNameString, moduleStableString)
 import           GHC.Data.ShortText       (ShortText)
 import qualified GHC.Data.ShortText       as T
 
@@ -63,6 +63,8 @@ import           Control.Monad
 import           Data.Array
 import           Data.Binary
 import qualified Data.ByteString          as B
+import qualified Data.ByteString.Char8    as BC
+import qualified Data.ByteString.Lazy.Char8 as BLC
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Function            (on)
 import           Data.Int
@@ -91,6 +93,8 @@ import           System.Directory ( createDirectoryIfMissing
                                   )
 
 import Prelude
+import GHC.Driver.Session (targetWays_, settings)
+import GHC.Settings (sTopDir)
 
 -- number of bytes linked per module
 type LinkerStats  = Map Module Int64
@@ -116,29 +120,30 @@ emptyArchiveState :: IO ArchiveState
 emptyArchiveState = ArchiveState <$> newIORef M.empty
 
 -- | link and write result to disk (jsexe directory)
-link :: Logger
+link :: HscEnv
      -> GhcjsEnv
      -> JSLinkConfig
-     -> FilePath                   -- ^ output file/directory
-     -> [FilePath]                 -- ^ include path for home package
-     -> [UnitId]          -- ^ packages to link
-     -> [LinkedObj]                -- ^ the object files we're linking
-     -> [FilePath]                 -- ^ extra js files to include
-     -> (ExportedFun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
-     -> Set ExportedFun                    -- ^ extra symbols to link in
+     -> StgToJSConfig
+     -> FilePath               -- ^ output file/directory
+     -> [FilePath]             -- ^ include path for home package
+     -> [UnitId]               -- ^ packages to link
+     -> [LinkedObj]            -- ^ the object files we're linking
+     -> [FilePath]             -- ^ extra js files to include
+     -> (ExportedFun -> Bool)  -- ^ functions from the objects to use as roots (include all their deps)
+     -> Set ExportedFun        -- ^ extra symbols to link in
      -> IO ()
-link logger dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
-  | lcNoJSExecutables settings = return ()
+link hsc_env env lc_cfg cfg out include pkgs objFiles jsFiles isRootFun extraStaticDeps
+  | lcNoJSExecutables lc_cfg = return ()
   | otherwise = do
-      LinkResult lo lstats lmetasize lfrefs llW lla llarch lbase <-
-        link' logger env settings out include pkgs objFiles jsFiles
+      LinkResult lo lstats lmetasize _lfrefs llW lla llarch lbase <-
+        link' hsc_env env lc_cfg cfg out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
-      let genBase = isJust (lcGenBase settings)
+      let genBase = isJust (lcGenBase lc_cfg)
           jsExt | genBase   = "base.js"
                 | otherwise = "js"
       createDirectoryIfMissing False out
       BL.writeFile (out </> "out" <.> jsExt) lo
-      unless (lcOnlyOut settings) $ do
+      unless (lcOnlyOut lc_cfg) $ do
         let frefsFile   = if genBase then "out.base.frefs" else "out.frefs"
             -- FIXME: Jeff (2022,03): GHCJS used Aeson to encode Foreign
             -- references as StaticDeps to a Bytestring and then write these out
@@ -152,125 +157,133 @@ link logger dflags env settings out include pkgs objFiles jsFiles isRootFun extr
         BL.writeFile (out </> frefsFile <.> "json") jsonFrefs
         BL.writeFile (out </> frefsFile <.> "js")
                      ("h$checkForeignRefs(" <> jsonFrefs <> ");")
-        unless (lcNoStats settings) $ do
+        unless (lcNoStats lc_cfg) $ do
           let statsFile = if genBase then "out.base.stats" else "out.stats"
           writeFile (out </> statsFile) (linkerStats lmetasize lstats)
-        unless (lcNoRts settings) $ do
+        unless (lcNoRts lc_cfg) $ do
           withRts <- mapM (tryReadShimFile dflags) llW
-          BL.writeFile (out </> "rts.js")
-            (rtsDeclsText
-             <> BL.fromChunks withRts
-             <> rtsText' dflags (dfCgSettings dflags))
+          BL.writeFile (out </> "rts.js") (BLC.pack (T.unpack rtsDeclsText)
+                                           <> BL.fromChunks withRts
+                                           <> BLC.pack (T.unpack $ rtsText cfg))
         lla'    <- mapM (tryReadShimFile dflags) lla
         llarch' <- mapM (readShimsArchive dflags) llarch
         BL.writeFile (out </> "lib" <.> jsExt)
                      (BL.fromChunks $ llarch' ++ lla')
         if genBase
           then generateBase out lbase
-          else when (not (lcOnlyOut settings) &&
-                     not (lcNoRts settings) &&
-                     not (usingBase settings)) $ do
-                 combineFiles dflags out
-                 writeHtml dflags out
-                 writeRunMain dflags out
-                 writeRunner settings dflags out
-                 writeWebAppManifest dflags out
+          else when (    not (lcOnlyOut lc_cfg)
+                      && not (lcNoRts   lc_cfg)
+                      && not (usingBase lc_cfg)
+                    )
+               $ do
+                 let top = sTopDir . settings . hsc_dflags $ hsc_env
+                 _ <- combineFiles lc_cfg top out
+                 writeHtml    top out
+                 writeRunMain top out
+                 writeRunner lc_cfg out
+                 writeWebAppManifest top out
                  writeExterns out
 
 -- | link in memory
-link' :: Logger
+link' :: HscEnv
       -> GhcjsEnv
       -> JSLinkConfig
+      -> StgToJSConfig
       -> String                     -- ^ target (for progress message)
       -> [FilePath]                 -- ^ include path for home package
       -> [UnitId]                   -- ^ packages to link
       -> [LinkedObj]                -- ^ the object files we're linking
       -> [FilePath]                 -- ^ extra js files to include
-      -> (ExportedFun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
-      -> Set ExportedFun                    -- ^ extra symbols to link in
+      -> (ExportedFun -> Bool)      -- ^ functions from the objects to use as roots (include all their deps)
+      -> Set ExportedFun            -- ^ extra symbols to link in
       -> IO LinkResult
-link' logger env settings target _include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
+link' hsc_env env lc_cfg cfg target _include pkgs objFiles jsFiles isRootFun extraStaticDeps
+  = do
+  -- FIXME: Jeff (2022,04): This function has several helpers that should be
+  -- factored out. In its current condition it is hard to read exactly whats
+  -- going on and why.
       (objDepsMap, objRequiredUnits) <- loadObjDeps objFiles
-      let rootSelector | Just baseMod <- gsGenBase settings =
-                           \(ExportedFun  m _s) -> m == T.pack baseMod
+
+      let rootSelector | Just baseMod <- lcGenBase lc_cfg =
+                           \(ExportedFun  m _s) -> m == baseMod
                        | otherwise = isRootFun
-          roots = S.fromList . filter rootSelector $
-            concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
-          rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
-          objPkgs = map toPackageKey $ nub (map fst $ M.keys objDepsMap)
-      compilationProgressMsg logger $
-        case gsGenBase settings of
-          Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
-          _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
-      base <- case lcUseBase settings of
+          roots    = S.fromList . filter rootSelector $ concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
+          -- FIXME: Jeff (2022,03): Remove head. opt for NonEmptyList
+          rootMods = map (moduleNameString . moduleName . head) . group . sort . map funModule . S.toList $ roots
+          objPkgs  = map moduleUnitId $ nub (M.keys objDepsMap)
+
+      _ <- compilationProgressMsg (hsc_logger hsc_env) . text $
+                case lcGenBase lc_cfg of
+                  Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ moduleNameString (moduleName baseMod) ++ ")"
+                  _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
+      base <- case lcUseBase lc_cfg of
         NoBase        -> return emptyBase
         BaseFile file -> loadBase file
         BaseState b   -> return b
-      (rdPkgs, rds) <- rtsDeps dflags pkgs
+      (rdPkgs, rds) <- rtsDeps hsc_env pkgs
       -- c   <- newMVar M.empty
-      let rtsPkgs     =  map stringToUnitId
-                             ["@rts", "@rts_" ++ buildTag dflags]
+      let rtsPkgs     =  map stringToUnitId ["@rts", "@rts_" ++ waysTag (targetWays_ $ hsc_dflags hsc_env)]
           pkgs' :: [UnitId]
           pkgs'       = nub (rtsPkgs ++ rdPkgs ++ reverse objPkgs ++ reverse pkgs)
           pkgs''      = filter (not . isAlreadyLinked base) pkgs'
+          ue_state    = ue_units $ hsc_unit_env hsc_env
           -- pkgLibPaths = mkPkgLibPaths pkgs'
           -- getPkgLibPaths :: UnitId -> ([FilePath],[String])
           -- getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
-      (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
-          getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
-      pkgArchs <- getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs'')
+      (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<< getPackageArchives cfg (map snd $ mkPkgLibPaths ue_state pkgs')
+      pkgArchs <- getPackageArchives cfg (map snd $ mkPkgLibPaths ue_state pkgs'')
       (allDeps, code) <-
         collectDeps (objDepsMap `M.union` archsDepsMap)
-                    (pkgs' ++ [thisUnitId dflags])
+                    (pkgs' ++ [homeUnitId (ue_unsafeHomeUnit $ hsc_unit_env hsc_env)]) -- FIXME: dont use unsafe
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
                     (archsRequiredUnits ++ objRequiredUnits)
       let (outJs, metaSize, compactorState, stats) =
-             renderLinker settings dflags (baseCompactorState base) rds code
-          base'  = Base compactorState (nub $ basePkgs base ++ map mkPackage pkgs'')
+             renderLinker lc_cfg cfg (baseCompactorState base) rds code
+          base'  = Base compactorState (nub $ basePkgs base ++ pkgs'')
                          (allDeps `S.union` baseUnits base)
-      (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
-      (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
+      (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims [] (filter (isAlreadyLinked base) pkgs')
+      (shimsBefore, shimsAfter) <- getShims jsFiles pkgs''
       return $ LinkResult outJs stats metaSize
-                 (concatMap (\(_,_,_,_,_,_,r) -> r) code)
+                 (concatMap (\(_,_,_,_,_,r) -> r) code)
                  (filter (`notElem` alreadyLinkedBefore) shimsBefore)
                  (filter (`notElem` alreadyLinkedAfter)  shimsAfter)
                  pkgArchs base'
   where
     isAlreadyLinked :: Base -> UnitId -> Bool
-    isAlreadyLinked b pkg = mkPackage pkg `elem` basePkgs b
+    isAlreadyLinked b uid = uid `elem` basePkgs b
 
-    mkPkgLibPaths :: [UnitId] -> [(UnitId, ([FilePath],[String]))]
-    mkPkgLibPaths
+    mkPkgLibPaths :: UnitState -> [UnitId] -> [(UnitId, ([FilePath],[String]))]
+    mkPkgLibPaths u_st
       = map (\k -> ( k
-                   , (getInstalledPackageLibDirs dflags k
-                     , getInstalledPackageHsLibs dflags k)
+                   , (getInstalledPackageLibDirs u_st k
+                   , getInstalledPackageHsLibs u_st k)
                    ))
 
 renderLinker :: JSLinkConfig
+             -> StgToJSConfig
              -> CompactorState
              -> Set ExportedFun
              -> [(Module, JStat, ShortText, [ClosureInfo], [StaticInfo], [ForeignJSRef])] -- ^ linked code per module
              -> (BL.ByteString, Int64, CompactorState, LinkerStats)
-renderLinker settings renamerState rtsDeps code =
+renderLinker settings cfg renamerState rtsDeps code =
   let
-    -- TODO: Jeff (2022,03): implement the Compactor
-    -- (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,_,ci,si,_) -> (s,ci,si)) code)
-      pe = (<>"\n") . pretty
+      (_renamerState', compacted, meta) = compact settings cfg renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,s,_,ci,si,_) -> (s,ci,si)) code)
+      pe = (<>"\n") . show . pretty
       rendered  = fmap pe compacted
       renderedMeta = pe meta
-      renderedExports = unlines . filter (not . T.null) $ map (\(_,_,_,rs,_,_,_) -> rs) code
-      mkStat (m,_,_,_,_,_) b = (m, BL.length b)
-  in ( mconcat rendered <> renderedMeta <> renderedExports
-     , BL.length renderedMeta
+      renderedExports = concatMap T.unpack . filter (not . T.null) $ map (\(_,_,rs,_,_,_) -> rs) code
+      mkStat (m,_,_,_,_,_) b = (m, BL.length . BLC.pack $ b)
+  in ( BL.fromStrict $ BC.pack $ mconcat [mconcat rendered, renderedMeta, renderedExports]
+     , BL.length $ BL.fromStrict $ BC.pack renderedMeta
      , renamerState
      , M.fromList $ zipWith mkStat code rendered
      )
 
 linkerStats :: Int64         -- ^ code size of packed metadata
             -> LinkerStats   -- ^ code size per module
-            -> ShortText
-linkerStats meta s = T.pack $
+            -> String
+linkerStats meta s =
   intercalate "\n\n" [packageStats, moduleStats, metaStats] <> "\n\n"
   where
     ps = M.fromListWith (+) . map (\(m,s) -> (moduleName m,s)) . M.toList $ s

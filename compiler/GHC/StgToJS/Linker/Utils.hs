@@ -23,6 +23,10 @@ import qualified Data.ByteString as B
 import           Data.ByteString (ByteString)
 import           System.IO (withBinaryFile, IOMode(WriteMode))
 
+import          GHC.Data.ShortText
+import          GHC.Unit.State
+import          GHC.Unit.Types
+
 import           Prelude
 
 addExeExtension :: FilePath -> FilePath
@@ -49,3 +53,9 @@ writeBinaryFile file bs =
     chunks b =
       let (b1, b2) = B.splitAt 1073741824 b
       in  b1 : if B.null b1 then [] else chunks b2
+
+getInstalledPackageLibDirs :: UnitState -> UnitId -> [FilePath]
+getInstalledPackageLibDirs us = fmap unpack . maybe mempty unitLibraryDirs . lookupUnitId us
+
+getInstalledPackageHsLibs :: UnitState -> UnitId -> [String]
+getInstalledPackageHsLibs us = fmap unpack . maybe mempty unitLibraries . lookupUnitId us

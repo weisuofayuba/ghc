@@ -96,7 +96,7 @@ allocDynamicE  inline_alloc entry free cc
 
 allocDynamic :: StgToJSConfig -> Bool -> Ident -> JExpr -> [JExpr] -> Maybe JExpr -> JStat
 allocDynamic s haveDecl to entry free cc =
-  dec to `mappend` (toJExpr to |= allocDynamicE s entry free cc)
+  dec to `mappend` (toJExpr to |= allocDynamicE (csInlineAlloc s) entry free cc)
     where
       dec i | haveDecl  = DeclStat i
             | otherwise = mempty

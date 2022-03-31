@@ -384,6 +384,9 @@ rtsDecls = jsSaturate (Just "h$RTSD") $
 rtsText :: StgToJSConfig -> T.ShortText
 rtsText = T.pack . show . pretty . rts
 
+rtsDeclsText :: T.ShortText
+rtsDeclsText = T.pack . show . pretty $ rtsDecls
+
 rts :: StgToJSConfig -> JStat
 rts = jsSaturate (Just "h$RTS") . rts'
 

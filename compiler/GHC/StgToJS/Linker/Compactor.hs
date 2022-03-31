@@ -26,7 +26,9 @@
 -- this and optimize
 -----------------------------------------------------------------------------
 
-module GHC.StgToJS.Linker.Compactor where
+module GHC.StgToJS.Linker.Compactor
+  ( compact
+  ) where
 
 
 import           GHC.Utils.Panic
@@ -777,8 +779,6 @@ compact ln_cfg cfg cs0 rtsDeps0 input0
       -- the link time compiling
       -- (cs1, input1) = packStrings settings dflags cs0 input0
   in  renameInternals ln_cfg cfg cs0 rtsDeps1 input0
-
-  -- renameInternals settings dflags cs1 rtsDeps' input
 
 
 -- hash compactification

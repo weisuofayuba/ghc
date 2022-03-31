@@ -292,12 +292,14 @@ addLabel new cs =
 -- Base
 --------------------------------------------------------------------------------
 
--- FIXME: Jeff (2022,03): Pick a better name than Base
+-- FIXME: Jeff (2022,03): Pick a better name than Base, and should baseUnits be
+-- Set UnitId and basePkgs be [PackageId]? I'm unsure if this should hold
+-- UnitIds or UnitInfos or PackageIds or PackageNames
 -- | The Base bundle. Used for incremental linking it maintains the compactor
 -- state the base packages and units.
 data Base = Base { baseCompactorState :: CompactorState
-                 , basePkgs           :: [Module]
-                 , baseUnits          :: Set (Module, ShortText, Int)
+                 , basePkgs           :: [UnitId]
+                 , baseUnits          :: Set (Module, Int)
                  }
 
 instance DB.Binary Base where
@@ -323,17 +325,17 @@ putBase (Base cs packages funs) = do
   DB.putLazyByteString versionTag
   putCs cs
   putList DB.put packages
-  putList putPkg pkgs
+  -- putList putPkg pkgs
   putList DB.put mods
   putList putFun (S.toList funs)
   where
     pi :: Int -> DB.Put
     pi = DB.putWord32le . fromIntegral
     uniq :: Ord a => [a] -> [a]
-    uniq  = S.toList . S.fromList
-    pkgs  = uniq (map (\(x,_,_) -> x) $ S.toList funs)
-    pkgsM = M.fromList (zip pkgs [(0::Int)..])
-    mods  = uniq (map (\(_,x,_) -> x) $ S.toList funs)
+    uniq  = S.toList . S.fromList                    -- FIXME: Ick! Just use the Set in the first place!
+    -- pkgs  = uniq (map fst $ S.toList funs)
+    -- pkgsM = M.fromList (zip pkgs [(0::Int)..])
+    mods  = uniq (map fst $ S.toList funs)
     modsM = M.fromList (zip mods [(0::Int)..])
     putList f xs = pi (length xs) >> mapM_ f xs
     -- serialise the compactor state
@@ -349,9 +351,10 @@ putBase (Base cs packages funs) = do
       DB.put (M.toList pss)
       DB.put (M.toList pls)
       DB.put sts
-    putPkg mod = DB.put mod
+    -- putPkg mod = DB.put mod
     -- fixme group things first
-    putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
+    putFun (m,s) = --pi (pkgsM M.! p) >>
+                   pi (modsM M.! m) >> DB.put s
 
 getBase :: FilePath -> DB.Get Base
 getBase file = getBase'
@@ -359,9 +362,11 @@ getBase file = getBase'
     gi :: DB.Get Int
     gi = fromIntegral <$> DB.getWord32le
     getList f = DB.getWord32le >>= \n -> replicateM (fromIntegral n) f
-    getFun ps ms = (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
+    getFun ms = (,) <$>
+                   -- ((ps!) <$> gi) <*>
+                   ((ms!) <$> gi) <*> DB.get
     la xs = listArray (0, length xs - 1) xs
-    getPkg = DB.get
+    -- getPkg = DB.get
     getCs = do
       n   <- DB.get
       nm  <- M.fromList <$> DB.get
@@ -391,9 +396,9 @@ getBase file = getBase'
            (panic $ "getBase: incorrect version: " <> file)
       cs <- makeCompactorParent <$> getCs
       linkedPackages <- getList DB.get
-      pkgs <- la <$> getList getPkg
+      -- pkgs <- la <$> getList getPkg
       mods <- la <$> getList DB.get
-      funs <- getList (getFun pkgs mods)
+      funs <- getList (getFun mods)
       return (Base cs linkedPackages $ S.fromList funs)
 
 -- | lazily render the base metadata into a bytestring
@@ -446,13 +451,13 @@ data JSLinkConfig =
                , lcOnlyOut            :: Bool
                , lcNoRts              :: Bool
                , lcNoStats            :: Bool
-               , lcGenBase            :: Maybe String   -- ^ module name
+               , lcGenBase            :: Maybe Module   -- ^ base module
                , lcUseBase            :: UseBase
                , lcLinkJsLib          :: Maybe String
                , lcJsLibOutputDir     :: Maybe FilePath
                , lcJsLibSrcs          :: [FilePath]
                , lcDedupe             :: Bool
-               } deriving Show
+               }
 
 usingBase :: JSLinkConfig -> Bool
 usingBase s | NoBase <- lcUseBase s = False
