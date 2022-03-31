@@ -16,49 +16,58 @@ module GHC.HsToCore.Foreign.Decl ( dsForeigns ) where
 
 import GHC.Prelude
 
+import GHC.Platform
+
 import GHC.Tc.Utils.Monad        -- temp
+import GHC.Tc.Utils.Env
+import GHC.Tc.Utils.TcType
 
 import GHC.Core
+import GHC.Core.Unfold.Make
+import GHC.Core.Type
+import GHC.Core.TyCon
+import GHC.Core.Coercion
+import GHC.Core.Multiplicity
 
 import GHC.HsToCore.Foreign.Call
+import GHC.HsToCore.Foreign.JavaScript
+import GHC.HsToCore.Foreign.Prim
+import GHC.HsToCore.Foreign.Utils
 import GHC.HsToCore.Monad
 import GHC.HsToCore.Types (ds_next_wrapper_num)
 
 import GHC.Hs
-import GHC.Core.DataCon
-import GHC.Core.Unfold.Make
+
 import GHC.Types.Id
 import GHC.Types.Literal
 import GHC.Types.ForeignStubs
 import GHC.Types.SourceText
-import GHC.Unit.Module
 import GHC.Types.Name
-import GHC.Core.Type
 import GHC.Types.RepType
-import GHC.Core.TyCon
-import GHC.Core.Coercion
-import GHC.Core.Multiplicity
-import GHC.Tc.Utils.Env
-import GHC.Tc.Utils.TcType
+import GHC.Types.ForeignCall
+import GHC.Types.Basic
+import GHC.Types.SrcLoc
+
+import GHC.Unit.Module
+
+import GHC.Driver.Hooks
+import GHC.Driver.Ppr
+import GHC.Driver.Session
+import GHC.Driver.Config
 
 import GHC.Cmm.Expr
 import GHC.Cmm.Utils
-import GHC.Driver.Ppr
-import GHC.Types.ForeignCall
+
 import GHC.Builtin.Types
 import GHC.Builtin.Types.Prim
 import GHC.Builtin.Names
-import GHC.Types.Basic
-import GHC.Types.SrcLoc
-import GHC.Utils.Outputable
-import GHC.Data.FastString
-import GHC.Driver.Session
-import GHC.Driver.Config
-import GHC.Platform
+
 import GHC.Data.OrdList
+import GHC.Data.FastString
+
+import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Panic.Plain
-import GHC.Driver.Hooks
 import GHC.Utils.Encoding
 
 import Data.Maybe
@@ -204,18 +213,6 @@ fun_type_arg_stdcall_info platform StdCallConv ty
 fun_type_arg_stdcall_info _ _other_conv _
   = Nothing
 
-dsJsImport
-  :: Id
-  -> Coercion
-  -> CImportSpec
-  -> CCallConv
-  -> Safety
-  -> Maybe Header
-  -> DsM ([Binding], CHeader, CStub)
-dsJsImport id co spec cconv safety mHeader =
-  -- FIXME (Sylvain 2022-03-28): adapt code from GHCJS
-  dsCImport id co spec cconv safety mHeader
-
 {-
 ************************************************************************
 *                                                                      *
@@ -313,38 +310,6 @@ dsFCall fn_id co fcall mDeclHeader = do
                                                 wrap_rhs'
 
     return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], mempty, CStub cDoc)
-
-{-
-************************************************************************
-*                                                                      *
-\subsection{Primitive calls}
-*                                                                      *
-************************************************************************
-
-This is for `@foreign import prim@' declarations.
-
-Currently, at the core level we pretend that these primitive calls are
-foreign calls. It may make more sense in future to have them as a distinct
-kind of Id, or perhaps to bundle them with PrimOps since semantically and
-for calling convention they are really prim ops.
--}
-
-dsPrimCall :: Id -> Coercion -> ForeignCall
-           -> DsM ([(Id, Expr TyVar)], CHeader, CStub)
-dsPrimCall fn_id co fcall = do
-    let
-        ty                   = coercionLKind co
-        (tvs, fun_ty)        = tcSplitForAllInvisTyVars ty
-        (arg_tys, io_res_ty) = tcSplitFunTys fun_ty
-
-    args <- newSysLocalsDs arg_tys  -- no FFI representation polymorphism
-
-    ccall_uniq <- newUnique
-    let
-        call_app = mkFCall ccall_uniq fcall (map Var args) io_res_ty
-        rhs      = mkLams tvs (mkLams args call_app)
-        rhs'     = Cast rhs co
-    return ([(fn_id, rhs')], mempty, mempty)
 
 {-
 ************************************************************************
@@ -822,46 +787,3 @@ ret_addr_arg :: Platform -> (SDoc, SDoc, Type, CmmType)
 ret_addr_arg platform = (text "original_return_addr", text "void*", undefined,
                          typeCmmType platform addrPrimTy)
 
--- This function returns the primitive type associated with the boxed
--- type argument to a foreign export (eg. Int ==> Int#).
-getPrimTyOf :: Type -> UnaryType
-getPrimTyOf ty
-  | isBoolTy rep_ty = intPrimTy
-  -- Except for Bool, the types we are interested in have a single constructor
-  -- with a single primitive-typed argument (see TcType.legalFEArgTyCon).
-  | otherwise =
-  case splitDataProductType_maybe rep_ty of
-     Just (_, _, data_con, [Scaled _ prim_ty]) ->
-        assert (dataConSourceArity data_con == 1) $
-        assertPpr (isUnliftedType prim_ty) (ppr prim_ty)
-        prim_ty
-     _other -> pprPanic "GHC.HsToCore.Foreign.Decl.getPrimTyOf" (ppr ty)
-  where
-        rep_ty = unwrapType ty
-
--- represent a primitive type as a Char, for building a string that
--- described the foreign function type.  The types are size-dependent,
--- e.g. 'W' is a signed 32-bit integer.
-primTyDescChar :: Platform -> Type -> Char
-primTyDescChar platform ty
- | ty `eqType` unitTy = 'v'
- | otherwise
- = case typePrimRep1 (getPrimTyOf ty) of
-     IntRep      -> signed_word
-     WordRep     -> unsigned_word
-     Int8Rep     -> 'B'
-     Word8Rep    -> 'b'
-     Int16Rep    -> 'S'
-     Word16Rep   -> 's'
-     Int32Rep    -> 'W'
-     Word32Rep   -> 'w'
-     Int64Rep    -> 'L'
-     Word64Rep   -> 'l'
-     AddrRep     -> 'p'
-     FloatRep    -> 'f'
-     DoubleRep   -> 'd'
-     _           -> pprPanic "primTyDescChar" (ppr ty)
-  where
-    (signed_word, unsigned_word) = case platformWordSize platform of
-      PW4 -> ('W','w')
-      PW8 -> ('L','l')

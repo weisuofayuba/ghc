@@ -273,11 +273,13 @@ callbackPlaceholders (Just e) = [((TxtI "$c"), e)]
 
 parseFfiJME :: String -> Int -> Either String JExpr
 parseFfiJME _xs _u =  Left "parseFfiJME not yet implemented"
-  -- FIXME: removed temporarily for the codegen merge (sylvain)
+  -- FIXME (Sylvain 2022-02): removed temporarily for the codegen merge. Need to
+  -- decide which syntax we support
 
 parseFfiJM :: String -> Int -> Either String JStat
 parseFfiJM _xs _u = Left "parseFfiJM not yet implemented"
-  -- FIXME: removed temporarily for the codegen merge (sylvain)
+  -- FIXME (Sylvain 2022-02): removed temporarily for the codegen merge. Need to
+  -- decide which syntax we support
 
 saturateFFI :: JMacro a => Int -> a -> a
 saturateFFI u = jsSaturate (Just . ST.pack $ "ghcjs_ffi_sat_" ++ show u)

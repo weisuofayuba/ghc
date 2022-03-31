@@ -439,6 +439,9 @@ Library
         GHC.HsToCore.Expr
         GHC.HsToCore.Foreign.Call
         GHC.HsToCore.Foreign.Decl
+        GHC.HsToCore.Foreign.JavaScript
+        GHC.HsToCore.Foreign.Prim
+        GHC.HsToCore.Foreign.Utils
         GHC.HsToCore.GuardedRHSs
         GHC.HsToCore.ListComp
         GHC.HsToCore.Match
