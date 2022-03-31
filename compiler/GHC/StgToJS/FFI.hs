@@ -138,7 +138,11 @@ parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                  -> G JStat
 parseFFIPattern' callback javascriptCc pat t ret args
   | not javascriptCc = mkApply pat
-  | otherwise = do
+  | otherwise =
+   if True -- FIXME (Sylvain 2022-03): we don't support parsing of JS imports.
+           -- So we assume that we can directly apply to them...
+     then mkApply pat
+     else do
       u <- freshUnique
       case parseFfiJME pat u of
         Right (ValExpr (JVar (TxtI _ident))) -> mkApply pat
