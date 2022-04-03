@@ -23,7 +23,7 @@ module GHC.Tc.Gen.Expr
          tcPolyExpr, tcExpr,
          tcSyntaxOp, tcSyntaxOpGen, SyntaxOpType(..), synKnownType,
          tcCheckId,
-         getFixedTyVars ) where
+         ) where
 
 import GHC.Prelude
 
@@ -47,7 +47,8 @@ import GHC.Tc.Gen.Head
 import GHC.Tc.Gen.Bind        ( tcLocalBinds )
 import GHC.Tc.Instance.Family ( tcGetFamInstEnvs )
 import GHC.Core.FamInstEnv    ( FamInstEnvs )
-import GHC.Rename.Env         ( addUsedGRE )
+import GHC.Rename.Expr        ( mkExpandedExpr )
+import GHC.Rename.Env         ( addUsedGRE, lookupConstructorFields )
 import GHC.Tc.Utils.Env
 import GHC.Tc.Gen.Arrow
 import GHC.Tc.Gen.Match
@@ -67,7 +68,6 @@ import GHC.Types.Name.Reader
 import GHC.Core.TyCon
 import GHC.Core.Type
 import GHC.Tc.Types.Evidence
-import GHC.Types.Var.Set
 import GHC.Builtin.Types
 import GHC.Builtin.Names
 import GHC.Driver.Session
@@ -643,6 +643,25 @@ following.
   > updater (MyRec 0 "str")
   MyRec 2 "str"
 
+Note [Record Updates]
+~~~~~~~~~~~~~~~~~~~~~
+To typecheck a record update, we desugar it first.  Suppose we have
+    data T p q = T1 { x :: Int, y :: Bool, z :: Char }
+               | T2 { v :: Char }
+               | T3 { x :: Int }
+               | T4 { p :: Float, y :: Bool, x :: Int }
+               | T5
+Then the record update `e { x=e1, y=e2 }` desugars as follosw
+
+       e { x=e1, y=e2 }
+    ===>
+       let { x' = e1; y' = e2 } in
+       case e of
+          T1 _ _ z -> T1 x' y' z
+          T4 p _ _ -> T4 p y' x'
+T2, T3 and T5 should not occur, so we omit them from the match.
+The critical part of desugaring is to identify T and then T1/T4.
+
 -}
 
 -- Record updates via dot syntax are replaced by desugared expressions
@@ -652,7 +671,7 @@ following.
 tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_ty
   = assert (notNull rbnds) $
     do  { -- STEP -2: typecheck the record_expr, the record to be updated
-          (record_expr', record_rho) <- tcScalingUsage Many $ tcInferRho record_expr
+          (_, record_rho) <- tcScalingUsage Many $ tcInferRho record_expr
             -- Record update drops some of the content of the record (namely the
             -- content of the field being updated). As a consequence, unless the
             -- field being updated is unrestricted in the record, or we need an
@@ -673,6 +692,7 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
         ; let upd_flds = map (unLoc . hfbLHS . unLoc) rbinds
               upd_fld_occs = map (occNameFS . rdrNameOcc . rdrNameAmbiguousFieldOcc) upd_flds
               sel_ids      = map selectorAmbiguousFieldOcc upd_flds
+              upd_fld_names = map idName sel_ids
         -- STEP 0
         -- Check that the field names are really field names
         -- and they are all field names for proper records or
@@ -696,11 +716,6 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
         ; let   -- It's OK to use the non-tc splitters here (for a selector)
               sel_id : _  = sel_ids
 
-              mtycon :: Maybe TyCon
-              mtycon = case idDetails sel_id of
-                          RecSelId (RecSelData tycon) _ -> Just tycon
-                          _ -> Nothing
-
               con_likes :: [ConLike]
               con_likes = case idDetails sel_id of
                              RecSelId (RecSelData tc) _
@@ -710,117 +725,37 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
                              _  -> panic "tcRecordUpd"
                 -- NB: for a data type family, the tycon is the instance tycon
 
-              relevant_cons = conLikesWithFields con_likes upd_fld_occs
+              relevant_cons = map conLikeName $ conLikesWithFields con_likes upd_fld_occs
                 -- A constructor is only relevant to this process if
                 -- it contains *all* the fields that are being updated
                 -- Other ones will cause a runtime error if they occur
-
-        -- Step 2
+              make_pat :: Name -> TcM (LMatch GhcRn (LHsExpr GhcRn))
+              make_pat con = do {
+                                 con_fields <- lookupConstructorFields con
+                                ; let con_fld_names = map flSelector con_fields
+                                      con_fld_occ_names = map occName con_fld_names
+                                ; con_field_names <- mapM newSysName con_fld_occ_names
+                                ; let con_fld_vars = map genLHsVar con_field_names
+                                      fieldsVars = zip con_fields con_fld_vars
+                                      updEnv = zip upd_fld_names $ map (\(L _ bind) -> hfbRHS bind) rbinds
+                                      to_val (fld, var) = lookup (flSelector fld) updEnv `orElse` var
+                                      vals = map to_val fieldsVars
+                                      rhs = wrapGenSpan $ genHsApps con vals
+                                      -- todo: change to underscore
+                                      pat = nlConVarPatName con con_field_names
+                                ; return $ mkSimpleMatch CaseAlt [pat] rhs
+                               }
+        -- STEP 2
         -- Check that at least one constructor has all the named fields
         -- i.e. has an empty set of bad fields returned by badFields
         ; checkTc (not (null relevant_cons)) (badFieldsUpd rbinds con_likes)
 
-        -- Take apart a representative constructor
-        ; let con1 = assert (not (null relevant_cons) ) head relevant_cons
-              (con1_tvs, _, _, _prov_theta, req_theta, scaled_con1_arg_tys, _)
-                 = conLikeFullSig con1
-              con1_arg_tys = map scaledThing scaled_con1_arg_tys
-                -- We can safely drop the fields' multiplicities because
-                -- they are currently always 1: there is no syntax for record
-                -- fields with other multiplicities yet. This way we don't need
-                -- to handle it in the rest of the function
-              con1_flds   = map flLabel $ conLikeFieldLabels con1
-              con1_tv_tys = mkTyVarTys con1_tvs
-              con1_res_ty = case mtycon of
-                              Just tc -> mkFamilyTyConApp tc con1_tv_tys
-                              Nothing -> conLikeResTy con1 con1_tv_tys
-
-        -- Check that we're not dealing with a unidirectional pattern
-        -- synonym
-        ; checkTc (conLikeHasBuilder con1) $
-          nonBidirectionalErr (conLikeName con1)
-
-        -- STEP 3    Note [Criteria for update]
-        -- Check that each updated field is polymorphic; that is, its type
-        -- mentions only the universally-quantified variables of the data con
-        ; let flds1_w_tys  = zipEqual "tcExpr:RecConUpd" con1_flds con1_arg_tys
-              bad_upd_flds = filter bad_fld flds1_w_tys
-              con1_tv_set  = mkVarSet con1_tvs
-              bad_fld (fld, ty) = fld `elem` upd_fld_occs &&
-                                      not (tyCoVarsOfType ty `subVarSet` con1_tv_set)
-        ; checkTc (null bad_upd_flds) (TcRnFieldUpdateInvalidType bad_upd_flds)
-
-        -- STEP 4  Note [Type of a record update]
-        -- Figure out types for the scrutinee and result
-        -- Both are of form (T a b c), with fresh type variables, but with
-        -- common variables where the scrutinee and result must have the same type
-        -- These are variables that appear in *any* arg of *any* of the
-        -- relevant constructors *except* in the updated fields
-        --
-        ; let fixed_tvs = getFixedTyVars upd_fld_occs con1_tvs relevant_cons
-              is_fixed_tv tv = tv `elemVarSet` fixed_tvs
-
-              mk_inst_ty :: TCvSubst -> (TyVar, TcType) -> TcM (TCvSubst, TcType)
-              -- Deals with instantiation of kind variables
-              --   c.f. GHC.Tc.Utils.TcMType.newMetaTyVars
-              mk_inst_ty subst (tv, result_inst_ty)
-                | is_fixed_tv tv   -- Same as result type
-                = return (extendTvSubst subst tv result_inst_ty, result_inst_ty)
-                | otherwise        -- Fresh type, of correct kind
-                = do { (subst', new_tv) <- newMetaTyVarX subst tv
-                     ; return (subst', mkTyVarTy new_tv) }
-
-        ; (result_subst, con1_tvs') <- newMetaTyVars con1_tvs
-        ; let result_inst_tys = mkTyVarTys con1_tvs'
-              init_subst = mkEmptyTCvSubst (getTCvInScope result_subst)
-
-        ; (scrut_subst, scrut_inst_tys) <- mapAccumLM mk_inst_ty init_subst
-                                                      (con1_tvs `zip` result_inst_tys)
-
-        ; let rec_res_ty    = TcType.substTy result_subst con1_res_ty
-              scrut_ty      = TcType.substTy scrut_subst  con1_res_ty
-              con1_arg_tys' = map (TcType.substTy result_subst) con1_arg_tys
-
-        ; co_scrut <- unifyType (Just . HsExprRnThing $ unLoc record_expr) record_rho scrut_ty
-                -- NB: normal unification is OK here (as opposed to subsumption),
-                -- because for this to work out, both record_rho and scrut_ty have
-                -- to be normal datatypes -- no contravariant stuff can go on
-
-        -- STEP 5
-        -- Typecheck the bindings
-        ; rbinds'      <- tcRecordUpd con1 con1_arg_tys' rbinds
-
-        -- STEP 6: Deal with the stupid theta.
-        -- See Note [The stupid context] in GHC.Core.DataCon.
-        ; let theta' = substThetaUnchecked scrut_subst (conLikeStupidTheta con1)
-        ; instStupidTheta RecordUpdOrigin theta'
-
-        -- Step 7: make a cast for the scrutinee, in the
-        --         case that it's from a data family
-        ; let fam_co :: HsWrapper   -- RepT t1 .. tn ~R scrut_ty
-              fam_co | Just tycon <- mtycon
-                     , Just co_con <- tyConFamilyCoercion_maybe tycon
-                     = mkWpCastR (mkTcUnbranchedAxInstCo co_con scrut_inst_tys [])
-                     | otherwise
-                     = idHsWrapper
-
-        -- Step 8: Check that the req constraints are satisfied
-        -- For normal data constructors req_theta is empty but we must do
-        -- this check for pattern synonyms.
-        ; let req_theta' = substThetaUnchecked scrut_subst req_theta
-        ; req_wrap <- instCallConstraints RecordUpdOrigin req_theta'
-
-        -- Phew!
-        ; let upd_tc = RecordUpdTc { rupd_cons = relevant_cons
-                                   , rupd_in_tys = scrut_inst_tys
-                                   , rupd_out_tys = result_inst_tys
-                                   , rupd_wrap = req_wrap }
-              expr' = RecordUpd { rupd_expr = mkLHsWrap fam_co $
-                                                mkLHsWrapCo co_scrut record_expr'
-                                , rupd_flds = Left rbinds'
-                                , rupd_ext = upd_tc }
-
-        ; tcWrapResult expr expr' rec_res_ty res_ty }
+        -- STEP 3
+        -- Desugar to HsCase see note [Record Updates]
+        ; pats <- mapM make_pat relevant_cons
+        ; let expr' = mkExpandedExpr expr (HsCase noExtField record_expr (mkMatchGroup Generated (noLocA pats)))
+        ; tcExpr expr' res_ty
+        }
 tcExpr (RecordUpd {}) _ = panic "GHC.Tc.Gen.Expr: tcExpr: The impossible happened!"
 
 
@@ -1167,30 +1102,6 @@ in the other order, the extra signature in f2 is reqd.
 *                                                                      *
 ********************************************************************* -}
 
-getFixedTyVars :: [FieldLabelString] -> [TyVar] -> [ConLike] -> TyVarSet
--- These tyvars must not change across the updates
-getFixedTyVars upd_fld_occs univ_tvs cons
-      = mkVarSet [tv1 | con <- cons
-                      , let (u_tvs, _, eqspec, prov_theta
-                             , req_theta, arg_tys, _)
-                              = conLikeFullSig con
-                            theta = eqSpecPreds eqspec
-                                     ++ prov_theta
-                                     ++ req_theta
-                            flds = conLikeFieldLabels con
-                            fixed_tvs = exactTyCoVarsOfTypes (map scaledThing fixed_tys)
-                                    -- fixed_tys: See Note [Type of a record update]
-                                        `unionVarSet` tyCoVarsOfTypes theta
-                                    -- Universally-quantified tyvars that
-                                    -- appear in any of the *implicit*
-                                    -- arguments to the constructor are fixed
-                                    -- See Note [Implicit type sharing]
-
-                            fixed_tys = [ty | (fl, ty) <- zip flds arg_tys
-                                            , not (flLabel fl `elem` upd_fld_occs)]
-                      , (tv1,tv) <- univ_tvs `zip` u_tvs
-                      , tv `elemVarSet` fixed_tvs ]
-
 -- Disambiguate the fields in a record update.
 -- See Note [Disambiguating record fields] in GHC.Tc.Gen.Head
 disambiguateRecordBinds :: LHsExpr GhcRn -> TcRhoType
@@ -1350,34 +1261,6 @@ tcRecordBinds con_like arg_tys (HsRecFields rbinds dd)
                                                      , hfbRHS = rhs'
                                                      , hfbPun = hfbPun fld}))) }
 
-tcRecordUpd
-        :: ConLike
-        -> [TcType]     -- Expected type for each field
-        -> [LHsFieldBind GhcTc (LAmbiguousFieldOcc GhcTc) (LHsExpr GhcRn)]
-        -> TcM [LHsRecUpdField GhcTc]
-
-tcRecordUpd con_like arg_tys rbinds = fmap catMaybes $ mapM do_bind rbinds
-  where
-    fields = map flSelector $ conLikeFieldLabels con_like
-    flds_w_tys = zipEqual "tcRecordUpd" fields arg_tys
-
-    do_bind :: LHsFieldBind GhcTc (LAmbiguousFieldOcc GhcTc) (LHsExpr GhcRn)
-            -> TcM (Maybe (LHsRecUpdField GhcTc))
-    do_bind (L l fld@(HsFieldBind { hfbLHS = L loc af
-                                 , hfbRHS = rhs }))
-      = do { let lbl = rdrNameAmbiguousFieldOcc af
-                 sel_id = selectorAmbiguousFieldOcc af
-                 f = L loc (FieldOcc (idName sel_id) (L (l2l loc) lbl))
-           ; mb <- tcRecordField con_like flds_w_tys f rhs
-           ; case mb of
-               Nothing         -> return Nothing
-               Just (f', rhs') ->
-                 return (Just
-                         (L l (fld { hfbLHS
-                                      = L loc (Unambiguous
-                                               (foExt (unLoc f'))
-                                               (L (l2l loc) lbl))
-                                   , hfbRHS = rhs' }))) }
 
 tcRecordField :: ConLike -> Assoc Name Type
               -> LFieldOcc GhcRn -> LHsExpr GhcRn

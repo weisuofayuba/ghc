@@ -23,7 +23,7 @@ free variables.
 -}
 
 module GHC.Rename.Expr (
-        rnLExpr, rnExpr, rnStmts,
+        rnLExpr, rnExpr, rnStmts, mkExpandedExpr,
         AnnoBody
    ) where
 
@@ -1150,9 +1150,10 @@ rnStmt ctxt rnBody (L loc (RecStmt { recS_stmts = L _ rec_stmts })) thing_inside
   = do  { (return_op, fvs1)  <- lookupQualifiedDoStmtName ctxt returnMName
         ; (mfix_op,   fvs2)  <- lookupQualifiedDoStmtName ctxt mfixName
         ; (bind_op,   fvs3)  <- lookupQualifiedDoStmtName ctxt bindMName
-        ; let empty_rec_stmt = emptyRecStmtName { recS_ret_fn  = return_op
-                                                , recS_mfix_fn = mfix_op
-                                                , recS_bind_fn = bind_op }
+        ; let empty_rec_stmt = (emptyRecStmtName :: StmtLR GhcRn GhcRn (LocatedA (body GhcRn)))
+                                { recS_ret_fn  = return_op
+                                , recS_mfix_fn = mfix_op
+                                , recS_bind_fn = bind_op }
 
         -- Step1: Bring all the binders of the mdo into scope
         -- (Remember that this also removes the binders from the

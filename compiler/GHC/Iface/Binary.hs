@@ -138,7 +138,7 @@ readBinIface profile name_cache checkHiWay traceBinIface hi_path = do
 
     extFields_p <- get bh
 
-    mod_iface <- getWithUserData name_cache bh
+    mod_iface :: ModIface <- getWithUserData name_cache bh
 
     seekBin bh extFields_p
     extFields <- get bh
