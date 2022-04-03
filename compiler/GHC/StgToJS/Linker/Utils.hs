@@ -1,5 +1,3 @@
-{-# OPTIONS_GHC -Wall #-}
-
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  GHC.StgToJS.Linker.Utils
@@ -23,11 +21,17 @@ import qualified Data.ByteString as B
 import           Data.ByteString (ByteString)
 import           System.IO (withBinaryFile, IOMode(WriteMode))
 
+import          GHC.Driver.Session
+import          GHC.Settings.Config (cProjectVersion)
+
 import          GHC.Data.ShortText
 import          GHC.Unit.State
 import          GHC.Unit.Types
+import          GHC.Utils.Panic
 
 import           Prelude
+import GHC.Platform
+import Data.List (isPrefixOf)
 
 addExeExtension :: FilePath -> FilePath
 addExeExtension = id
@@ -59,3 +63,35 @@ getInstalledPackageLibDirs us = fmap unpack . maybe mempty unitLibraryDirs . loo
 
 getInstalledPackageHsLibs :: UnitState -> UnitId -> [String]
 getInstalledPackageHsLibs us = fmap unpack . maybe mempty unitLibraries . lookupUnitId us
+
+tryReadShimFile :: DynFlags -> FilePath -> IO B.ByteString
+tryReadShimFile = panic "tryReadShimFile: Shims not yet implemented!"
+
+readShimsArchive :: DynFlags -> FilePath -> IO B.ByteString
+readShimsArchive = panic "readShimsArchive: Shims not yet implemented!"
+
+getCompilerVersion :: String
+getCompilerVersion = cProjectVersion
+
+jsexeExtension :: String
+jsexeExtension = "jsexe"
+
+-- FIXME: Jeff (2022,04): remove this function since it is a duplicate of
+-- GHC.Linker.Static.Utils.exeFileName
+jsExeFileName :: DynFlags -> FilePath
+jsExeFileName dflags
+  | Just s <- outputFile_ dflags =
+      -- unmunge the extension
+      let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
+                    -- FIXME: add this check when support for Windows check is added
+      in if Prelude.null s' -- || (Platform.isWindows && map toLower s' == "exe")
+           then dropExtension s <.> jsexeExtension
+           else dropExtension s <.> s'
+  | otherwise =
+      if platformOS (targetPlatform dflags) == OSMinGW32
+           then "main.jsexe"
+           else "a.jsexe"
+  where
+    dropPrefix prefix xs
+      | prefix `isPrefixOf` xs = drop (length prefix) xs
+      | otherwise              = xs

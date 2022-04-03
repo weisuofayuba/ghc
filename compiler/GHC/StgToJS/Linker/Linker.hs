@@ -42,7 +42,7 @@ import           GHC.StgToJS.Printer
 
 import qualified GHC.SysTools.Ar          as Ar
 import           GHC.Utils.Encoding
-import           GHC.Utils.Outputable (ppr, vcat, text)
+import           GHC.Utils.Outputable (ppr, text)
 import           GHC.Utils.Panic
 import           GHC.Unit.State
 import           GHC.Unit.Env
@@ -51,17 +51,13 @@ import           GHC.Unit.Types
 import           GHC.Utils.Error
 import           GHC.Platform.Ways
 import           GHC.Driver.Env.Types
-import           GHC.Unit.Module ( moduleNameString, moduleStableString)
 import           GHC.Data.ShortText       (ShortText)
 import qualified GHC.Data.ShortText       as T
 
 import           Control.Concurrent.MVar
-import           Control.DeepSeq
-import           Control.Exception        (evaluate)
 import           Control.Monad
 
 import           Data.Array
-import           Data.Binary
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Char8    as BC
 import qualified Data.ByteString.Lazy.Char8 as BLC
@@ -95,6 +91,8 @@ import           System.Directory ( createDirectoryIfMissing
 import Prelude
 import GHC.Driver.Session (targetWays_, settings)
 import GHC.Settings (sTopDir)
+import GHC.Unit.Module.Name
+import GHC.Unit.Module (moduleStableString)
 
 -- number of bytes linked per module
 type LinkerStats  = Map Module Int64
@@ -110,9 +108,6 @@ data LinkResult = LinkResult
   , linkLibAArch    :: [FilePath]    -- ^ library code to load from archives after RTS
   , linkBase        :: Base          -- ^ base metadata to use if we want to link incrementally against this result
   } deriving (Generic)
-
-instance Binary LinkResult
-
 
 newtype ArchiveState = ArchiveState { loadedArchives :: IORef (Map FilePath Ar.Archive) }
 
@@ -153,6 +148,7 @@ link hsc_env env lc_cfg cfg out include pkgs objFiles jsFiles isRootFun extraSta
             -- - this line called out to the FromJSon Instance
             -- jsonFrefs  = Aeson.encode lfrefs
             jsonFrefs  = mempty
+            dflags     = hsc_dflags hsc_env
 
         BL.writeFile (out </> frefsFile <.> "json") jsonFrefs
         BL.writeFile (out </> frefsFile <.> "js")
@@ -208,7 +204,8 @@ link' hsc_env env lc_cfg cfg target _include pkgs objFiles jsFiles isRootFun ext
                            \(ExportedFun  m _s) -> m == baseMod
                        | otherwise = isRootFun
           roots    = S.fromList . filter rootSelector $ concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
-          -- FIXME: Jeff (2022,03): Remove head. opt for NonEmptyList
+          -- FIXME: Jeff (2022,03): Remove head. opt for NonEmptyList. Every
+          -- head is a time bomb waiting to explode
           rootMods = map (moduleNameString . moduleName . head) . group . sort . map funModule . S.toList $ roots
           objPkgs  = map moduleUnitId $ nub (M.keys objDepsMap)
 
@@ -287,8 +284,9 @@ linkerStats meta s =
   intercalate "\n\n" [packageStats, moduleStats, metaStats] <> "\n\n"
   where
     ps = M.fromListWith (+) . map (\(m,s) -> (moduleName m,s)) . M.toList $ s
+    pad :: Int -> String -> String
     pad n t = let l = length t
-              in  if l < n then t <> replicate (n-l) " " else t
+              in  if l < n then t <> replicate (n-l) ' ' else t
 
     pkgMods :: [[(Module,Int64)]]
     pkgMods = groupBy ((==) `on` fst) (M.toList s)
@@ -298,7 +296,7 @@ linkerStats meta s =
 
     packageStats :: String
     packageStats = "code size summary per package:\n\n"
-                   <> concatMap (\(p,s) -> pad 25 (show p <> ":") <> show s) $ M.toList ps
+                   <> concatMap (\(p,s) -> pad 25 (show p <> ":") <> show s) (M.toList ps)
 
     moduleStats :: String
     moduleStats = "code size per module:\n\n" <> unlines (map (concatMap showMod) pkgMods)
@@ -438,7 +436,7 @@ getDeps loaded_deps base fun startlu = go' S.empty (S.fromList startlu) (S.toLis
       Nothing -> return result
       Just (lu@(lmod,n), open') ->
           case M.lookup lmod loaded_deps of
-            Nothing -> error ("getDeps.go: object file not loaded for:  " ++ show lmod)
+            Nothing -> pprPanic "getDeps.go: object file not loaded for:  " (pprModule lmod)
             Just (Deps _ _ _ b) ->
               let block = b!n
                   result' = S.insert lu result
@@ -454,10 +452,10 @@ getDeps loaded_deps base fun startlu = go' S.empty (S.fromList startlu) (S.toLis
     go' result open (f:fs) =
         let key = funModule f
         in  case M.lookup key loaded_deps of
-              Nothing -> error ("getDeps.go': object file not loaded for:  " ++ show key)
+              Nothing -> pprPanic "getDeps.go': object file not loaded for:  " $ pprModule key
               Just (Deps _m _r e _b) ->
                  let lun :: Int
-                     lun = fromMaybe (error $ "exported function not found: " ++ show f)
+                     lun = fromMaybe (pprPanic "exported function not found: " $ pprModule key)
                                      (M.lookup f e)
                      lu  = (key, lun)
                  in  go' result (addOpen result open [lu]) fs
@@ -523,7 +521,8 @@ extractDeps ar_state units deps loc =
                             --  error ("Ar.readObject: " ++ a ++ ':' : T.unpack mod))
                             -- Ar.readObject (mkModuleName $ T.unpack mod) a)
         InMemory n b  -> collectCode $ readObjectKeys n selector b
-      evaluate (rnf x)
+      -- evaluate (rnf x) -- See FIXME Re: NFData instance on Safety and
+                          -- ForeignJSRefs below
       return x
   where
     mod           = depsModule deps
@@ -536,7 +535,14 @@ extractDeps ar_state units deps loc =
                             , concatMap oiClInfo l
                             , concatMap oiStatic l
                             , concatMap oiFImports l)
-                    in evaluate (rnf x) >> return (Just x)
+                -- FIXME: (2022,04): this evaluate and rnf require an NFData
+                -- instance on ForeignJSRef which in turn requries a NFData
+                -- instance on Safety. Does this even make sense? We'll skip
+                -- this for now.
+
+                --  in evaluate (rnf x) >> return (Just x)
+
+                    in return (Just x)
 
 readArObject :: ArchiveState -> Module -> FilePath -> IO BL.ByteString
 readArObject ar_state mod ar_file = do
@@ -661,7 +667,13 @@ readSystemDeps' hsc_env file
                                   )
   | otherwise = pure (mempty, mempty)
   where
-    d pkg mod symbols = map (ExportedFun pkg . mkHaskellSym pkg mod) symbols
+
+    d :: String -> String -> [String] -> [ExportedFun]
+    d pkg mod symbols = map (let pkg_module = mkJsModule pkg
+                              in ExportedFun pkg_module
+                                 . mkHaskellSym pkg_module (T.pack mod)
+                                 . T.pack)
+                        symbols
     zenc  = T.pack . zEncodeString . T.unpack
 
     mkHaskellSym :: Module -> ShortText -> ShortText -> ShortText
@@ -670,6 +682,8 @@ readSystemDeps' hsc_env file
                                        <> m
                                        <> "."
                                        <> s)
+    mkJsModule :: String -> GenModule Unit
+    mkJsModule pkg = mkModule (RealUnit (Definite (stringToUnitId pkg))) (mkModuleName pkg)
 
 {-
   b  <- readBinaryFile (getLibDir dflags </> file)
@@ -749,10 +763,10 @@ staticDeps hsc_env wiredin sdeps = mkDeps sdeps
                                      ++ "I looked for: "
                                      ++ T.unpack mod_name
                                      ++ " receieved " ++ moduleNameString (moduleName mod)
-                                     ++ " but could not find: " ++ show mod_uid
+                                     ++ " but could not find: " ++ unitString mod_uid
                                      ++ " in the UnitState."
                                      ++ " Here is too much info for you: ")
-                            $ vcat [ppr mod, ppr u_st]
+                            $ pprWithUnitState u_st (ppr mod)
                  -- we are all good, add the uid to the package set, construct
                  -- its symbols on the fly and add the module to exported symbol
                  -- set

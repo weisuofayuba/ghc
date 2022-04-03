@@ -27,11 +27,12 @@ import GHC.Data.ShortText
 import GHC.Unit.Module
 
 import qualified Data.Map as M
-import Data.Set (Set)
+import           Data.Set (Set)
 import qualified Data.ByteString as BS
-import Data.Monoid
-import Data.Typeable (Typeable)
-import GHC.Generics (Generic)
+import           Data.Monoid
+import           Data.Typeable (Typeable)
+import           GHC.Generics (Generic)
+import           Control.DeepSeq
 
 type G = State GenState
 
@@ -82,14 +83,18 @@ data ClosureInfo = ClosureInfo
   , ciType    :: CIType    -- ^ type of the object, with extra info where required
   , ciStatic  :: CIStatic  -- ^ static references of this object
   }
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData ClosureInfo
 
 data CIRegs
   = CIRegsUnknown
   | CIRegs { ciRegsSkip  :: Int       -- ^ unused registers before actual args start
            , ciRegsTypes :: [VarType] -- ^ args
            }
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData CIRegs
 
 data CILayout
   = CILayoutVariable            -- layout stored in object itself, first position from the start
@@ -100,7 +105,9 @@ data CILayout
       { layoutSize :: !Int      -- closure size in array positions, including entry
       , layout     :: [VarType]
       }
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData CILayout
 
 data CIType
   = CIFun { citArity :: !Int  -- ^ function arity
@@ -111,12 +118,16 @@ data CIType
   | CIPap
   | CIBlackhole
   | CIStackFrame
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData CIType
 
 -- | Static references that must be kept alive
 newtype CIStatic = CIStaticRefs { staticRefs :: [ShortText] }
-  deriving stock   (Eq, Ord)
+  deriving stock   (Eq, Ord, Generic)
   deriving newtype (Semigroup, Monoid, Show)
+
+instance NFData CIStatic
 
 -- | static refs: array = references, null = nothing to report
 --   note: only works after all top-level objects have been created
@@ -136,7 +147,9 @@ data VarType
   | RtsObjV  -- some RTS object from GHCJS (for example TVar#, MVar#, MutVar#, Weak#)
   | ObjV     -- some JS object, user supplied, be careful around these, can be anything
   | ArrV     -- boxed array
-  deriving (Eq, Ord, Enum, Bounded, Show)
+  deriving stock (Eq, Ord, Enum, Bounded, Show, Generic)
+
+instance NFData VarType
 
 instance ToJExpr VarType where
   toJExpr = toJExpr . fromEnum
@@ -174,6 +187,8 @@ data StaticInfo = StaticInfo
   , siCC     :: !(Maybe Ident) -- ^ optional CCS name
   } deriving stock (Eq, Ord, Show, Typeable, Generic)
 
+instance NFData StaticInfo
+
 data StaticVal
   = StaticFun     !ShortText   [StaticArg]
     -- ^ heap object for function
@@ -186,7 +201,9 @@ data StaticVal
     -- ^ regular datacon app
   | StaticList    [StaticArg] (Maybe ShortText)
     -- ^ list initializer (with optional tail)
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData StaticVal
 
 data StaticUnboxed
   = StaticUnboxedBool         !Bool
@@ -194,13 +211,17 @@ data StaticUnboxed
   | StaticUnboxedDouble       !SaneDouble
   | StaticUnboxedString       !BS.ByteString
   | StaticUnboxedStringOffset !BS.ByteString
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData StaticUnboxed
 
 data StaticArg
   = StaticObjArg !ShortText             -- ^ reference to a heap object
   | StaticLitArg !StaticLit             -- ^ literal
   | StaticConArg !ShortText [StaticArg] -- ^ unfloated constructor
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
+
+instance NFData StaticArg
 
 instance Outputable StaticArg where
   ppr x = text (show x)
@@ -213,7 +234,9 @@ data StaticLit
   | StringLit !ShortText
   | BinLit    !BS.ByteString
   | LabelLit  !Bool !ShortText -- ^ is function pointer, label (also used for string / binary init)
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData StaticLit
 
 instance Outputable StaticLit where
   ppr x = text (show x)
@@ -235,7 +258,7 @@ data ForeignJSRef = ForeignJSRef
   , foreignRefCConv    :: !CCallConv
   , foreignRefArgs     :: ![ShortText]
   , foreignRefResult   :: !ShortText
-  }
+  } deriving stock (Generic)
 
 -- | data used to generate one ObjUnit in our object file
 data LinkableUnit = LinkableUnit
