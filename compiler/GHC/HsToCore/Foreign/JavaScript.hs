@@ -2,7 +2,8 @@
 
 module GHC.HsToCore.Foreign.JavaScript
   ( dsJsImport
-  , ghcjsDsFImport -- FIXME (Sylvain 2022-03): why are we exporting this?
+  , dsJsFExport
+  , dsJsFExportDynamic
   )
 where
 
@@ -37,7 +38,6 @@ import GHC.Types.Name
 import GHC.Types.RepType
 import GHC.Types.ForeignCall
 import GHC.Types.Basic
-import GHC.Types.SrcLoc
 import GHC.Types.Unique
 
 import GHC.Unit.Module
@@ -70,7 +70,7 @@ import GHC.Utils.Encoding
 
 type Binding = (Id,CoreExpr)
 
-ghcjsDsFExport
+dsJsFExport
   :: Id                 -- Either the exported Id,
                         -- or the foreign-export-dynamic constructor
   -> Coercion           -- Coercion between the Haskell type callable
@@ -86,7 +86,7 @@ ghcjsDsFExport
          , Int          -- size of args to stub function
          )
 
-ghcjsDsFExport fn_id co ext_name cconv isDyn = do
+dsJsFExport fn_id co ext_name cconv isDyn = do
     let
        ty                              = pSnd $ coercionKind co
        (_tvs,sans_foralls)             = tcSplitForAllTyVars ty
@@ -233,14 +233,6 @@ idClosureText i
   | otherwise
   = panic "idClosureText: unknown module"
 
-ghcjsDsFImport :: Id
-               -> Coercion
-               -> ForeignImport
-               -> DsM ([Binding], CHeader, CStub)
-ghcjsDsFImport id co (CImport cconv safety mHeader spec _) = do
-    (ids, h, c) <- dsJsImport id co spec (unLoc cconv) (unLoc safety) mHeader
-    return (ids, h, c)
-
 -- | Desugaring of JavaScript foreign imports
 dsJsImport
   :: Id
@@ -302,7 +294,7 @@ dsJsFExportDynamic id co0 cconv = do
         export_ty     = mkVisFunTyMany stable_ptr_ty arg_ty
     bindIOId <- dsLookupGlobalId bindIOName
     stbl_value <- newSysLocalDs Many stable_ptr_ty
-    (h_code, c_code, typestring, args_size) <- ghcjsDsFExport id (mkRepReflCo export_ty) fe_nm cconv True
+    (h_code, c_code, typestring, args_size) <- dsJsFExport id (mkRepReflCo export_ty) fe_nm cconv True
     let
          {-
           The arguments to the external function which will

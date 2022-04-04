@@ -345,7 +345,27 @@ dsFExport :: Id                 -- Either the exported Id,
                  , Int          -- size of args to stub function
                  )
 
-dsFExport fn_id co ext_name cconv isDyn = do
+dsFExport fn_id co ext_name cconv is_dyn = case cconv of
+  JavaScriptCallConv -> dsJsFExport fn_id co ext_name cconv is_dyn
+  _                  -> dsCFExport  fn_id co ext_name cconv is_dyn
+
+
+dsCFExport :: Id                -- Either the exported Id,
+                                -- or the foreign-export-dynamic constructor
+          -> Coercion           -- Coercion between the Haskell type callable
+                                -- from C, and its representation type
+          -> CLabelString       -- The name to export to C land
+          -> CCallConv
+          -> Bool               -- True => foreign export dynamic
+                                --         so invoke IO action that's hanging off
+                                --         the first argument's stable pointer
+          -> DsM ( CHeader      -- contents of Module_stub.h
+                 , CStub        -- contents of Module_stub.c
+                 , String       -- string describing type to pass to createAdj.
+                 , Int          -- size of args to stub function
+                 )
+
+dsCFExport fn_id co ext_name cconv isDyn = do
     let
        ty                     = coercionRKind co
        (bndrs, orig_res_ty)   = tcSplitPiTys ty
@@ -410,7 +430,15 @@ dsFExportDynamic :: Id
                  -> Coercion
                  -> CCallConv
                  -> DsM ([Binding], CHeader, CStub)
-dsFExportDynamic id co0 cconv = do
+dsFExportDynamic id co0 cconv = case cconv of
+  JavaScriptCallConv -> dsJsFExportDynamic id co0 cconv
+  _                  -> dsCFExportDynamic  id co0 cconv
+
+dsCFExportDynamic :: Id
+                 -> Coercion
+                 -> CCallConv
+                 -> DsM ([Binding], CHeader, CStub)
+dsCFExportDynamic id co0 cconv = do
     mod <- getModule
     dflags <- getDynFlags
     let platform = targetPlatform dflags
@@ -426,7 +454,7 @@ dsFExportDynamic id co0 cconv = do
         export_ty     = mkVisFunTyMany stable_ptr_ty arg_ty
     bindIOId <- dsLookupGlobalId bindIOName
     stbl_value <- newSysLocalDs Many stable_ptr_ty
-    (h_code, c_code, typestring, args_size) <- dsFExport id (mkRepReflCo export_ty) fe_nm cconv True
+    (h_code, c_code, typestring, args_size) <- dsCFExport id (mkRepReflCo export_ty) fe_nm cconv True
     let
          {-
           The arguments to the external function which will
