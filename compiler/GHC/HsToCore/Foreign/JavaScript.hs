@@ -50,7 +50,6 @@ import GHC.Cmm.Utils
 
 import GHC.JS.Ppr
 
-import GHC.Driver.Ppr
 import GHC.Driver.Session
 import GHC.Driver.Config
 
@@ -279,10 +278,9 @@ dsJsFExportDynamic id co0 cconv = do
                                         -- Must have an IO type; hence Just
                                         $ tcSplitIOType_maybe fn_res_ty
     mod <- getModule
-    dflags <- getDynFlags
-    let platform = targetPlatform dflags
+    platform <- targetPlatform <$> getDynFlags
     let fe_nm = mkFastString $ zEncodeString
-            ("h$" ++ moduleStableString mod ++ "$" ++ toCName dflags id)
+            ("h$" ++ moduleStableString mod ++ "$" ++ toJsName id)
         -- Construct the label based on the passed id, don't use names
         -- depending on Unique. See #13807 and Note [Unique Determinism].
     cback <- newSysLocalDs arg_mult arg_ty
@@ -336,8 +334,8 @@ dsJsFExportDynamic id co0 cconv = do
 
     return ([fed], h_code, c_code)
 
-toCName :: DynFlags -> Id -> String
-toCName dflags i = showSDoc dflags (pprCode CStyle (ppr (idName i)))
+toJsName :: Id -> String
+toJsName i = renderWithContext defaultSDocContext (pprCode CStyle (ppr (idName i)))
 
 dsJsCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], CHeader, CStub)
