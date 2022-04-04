@@ -1,5 +1,6 @@
 module GHC.HsToCore.Foreign.Utils
-  ( getPrimTyOf
+  ( Binding
+  , getPrimTyOf
   , primTyDescChar
   )
 where
@@ -10,10 +11,12 @@ import GHC.Platform
 
 import GHC.Tc.Utils.TcType
 
+import GHC.Core (CoreExpr)
 import GHC.Core.DataCon
 import GHC.Core.TyCon
 import GHC.Core.TyCo.Rep
 
+import GHC.Types.Id
 import GHC.Types.RepType
 
 import GHC.Builtin.Types
@@ -22,6 +25,10 @@ import GHC.Builtin.Types.Prim
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Panic.Plain
+
+type Binding = (Id, CoreExpr) -- No rec/nonrec structure;
+                              -- the occurrence analyser will sort it all out
+
 
 -- This function returns the primitive type associated with the boxed
 -- type argument to a foreign export (eg. Int ==> Int#).

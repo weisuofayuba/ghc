@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
+-- | Handling of JavaScript foreign imports/exports
 module GHC.HsToCore.Foreign.JavaScript
   ( dsJsImport
   , dsJsFExport
@@ -67,8 +68,6 @@ import qualified GHC.Data.ShortText as ST
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 import GHC.Utils.Encoding
-
-type Binding = (Id,CoreExpr)
 
 dsJsFExport
   :: Id                 -- Either the exported Id,
