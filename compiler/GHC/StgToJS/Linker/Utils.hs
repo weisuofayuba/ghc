@@ -12,6 +12,10 @@
 --
 -- Various utilies used in the JS Linker
 --
+----------------------------- FIXMEs -------------------------------------------
+--  - implement Windows check for @addExeExtension@
+--  - resolve macOS comment in @writeBinaryFile@
+--  - remove redundant function @jsExeFileName@
 -----------------------------------------------------------------------------
 
 module GHC.StgToJS.Linker.Utils where

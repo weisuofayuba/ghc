@@ -1,10 +1,10 @@
 {-# LANGUAGE CPP                      #-}
 {-# LANGUAGE TupleSections            #-}
-{-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
+{-# LANGUAGE LambdaCase #-}
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  GHC.StgToJS.Linker.DynamicLinking
+-- Module      :  GHC.StgToJS.Linker.Dynamic
 -- Copyright   :  (c) The University of Glasgow 2001
 -- License     :  BSD-style (see the file LICENSE)
 --
@@ -17,29 +17,65 @@
 -- Various utilities for building and loading dynamic libraries, to make
 -- Template Haskell work in GHCJS
 --
+----------------------------- FIXMEs -------------------------------------------
+-- FIXME: Jeff (2022,04): This module may be completely redundant and consist of
+-- duplicate code. Before we can remove it we must understand how it alters the
+-- link code in the GHC.Linker directory. Thus for the time being we live with
+-- it. In particular cases where we have duplicated functions in
+-- GHC.Driver.Pipeline and GHC.Linker.Static, I've prefixed these with "js"
+-- except for @link@ and @link'@, for example GHC.Linker.Static.linkStaticLib
+-- becomes GHC.StgToJS.Linker.Dynamic.jsLinkStaticLib.
+--
+-- FIXME: Jeff (2022,04): In jsLinkBinary I've commented out a line that
+-- dispatches to different systools based on a boolean flag. This line seems to
+-- be a relic of the old ghc api but I left it in since it will require
+-- attention to be verified correct. I suspect that entire function is made
+-- redundant by the corresponding GHC.Linker.Static.linkBinary anyhow. Please
+-- see the fixme comment in jsLinkBinary
+--
+-- FIXME: Jeff (2022,04): You'll notice that the APIs for the linking functions,
+-- @link@, @link'@ etc are quite hairy with lots of inputs, and over half of
+-- those inputs are environments of some sort including DynFlags. Of course this
+-- is insanity. The API is forced due a let expression in
+-- @GHC.StgToJS.Linker.Dynamic.link'@ which requires all linking functions to
+-- have the same interface as GHC.Linker.Static.linkBinary. To Fix this we
+-- should begin removing these environments by refining JSLinkConfig. For
+-- example:
+-- 1. Move any required flags from StgToJSConfig to JSLinkConfig
+-- 2. Remove DynFlags by removing any opts needed for linking and add them to
+--    JSLinkConfig
+-- 3. Similar for HscEnv, we might need to decouple GHCs Linker from DynFlags in
+--    order to have a proper api
 -----------------------------------------------------------------------------
 
-module GHC.StgToJS.Linker.DynamicLinking
+module GHC.StgToJS.Linker.Dynamic
   ( ghcjsLink
   , ghcjsDoLink
-  -- , isGhcjsPrimPackage
-  -- , ghcjsPrimPackage
   ) where
 
+import GHC.StgToJS.Linker.Archive
 import GHC.StgToJS.Linker.Types
 import GHC.StgToJS.Linker.Utils
-import GHC.StgToJS.Linker.Variants
+import qualified GHC.StgToJS.Linker.Linker as JSLink
 
-import GHC.Linker.Types
+import GHC.Linker.Dynamic
+import GHC.Linker.ExtraObj
+import GHC.Linker.MacOS
+import GHC.Linker.Static
 import GHC.Linker.Static.Utils
+import GHC.Linker.Types
+import GHC.Linker.Unit
+import GHC.Linker.Windows
 
-import GHC.Utils.Outputable hiding ((<>))
-import GHC.Utils.Exception
-import GHC.Unit.Module
 import GHC.Utils.Error
-import GHC.Driver.Session
+import GHC.Utils.Misc
+import GHC.Unit.Module
+import GHC.Unit.Module.ModIface
+import GHC.Unit.Module.Deps
+import GHC.Utils.Outputable hiding ((<>))
 import GHC.Driver.Phases
-import GHC.Driver.Pipeline hiding ( linkingNeeded )
+import GHC.Driver.Pipeline
+import GHC.Driver.Session
 
 import GHC.Types.Unique.DFM
 import GHC.Types.Basic
@@ -48,6 +84,8 @@ import qualified GHC.SysTools as SysTools
 import GHC.Unit.Home.ModInfo
 import GHC.Unit.Info
 import GHC.Unit.Env
+import GHC.Unit.State
+import GHC.Iface.Recomp
 
 import GHC.Platform
 import Prelude
@@ -56,7 +94,7 @@ import           Control.Monad
 
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString as BS
-import           Data.Either
+import           Data.Functor ((<&>))
 import           Data.List ( nub )
 import qualified GHC.Data.ShortText as T
 
@@ -69,34 +107,35 @@ import GHC.Utils.Panic
 import GHC.Driver.Env.Types
 import GHC.StgToJS.Types
 import GHC.Utils.TmpFs (TmpFs)
+import qualified Data.Set as Set
 
--------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
 -- Link libraries
 
 ghcjsLink :: GhcjsEnv
           -> JSLinkConfig
           -> StgToJSConfig
+          -> HscEnv
           -> [FilePath] -- ^ extra JS files
           -> Bool       -- ^ build JavaScript?
           -> GhcLink    -- ^ what to link
-          -> DynFlags
           -> Logger
           -> TmpFs
           -> UnitEnv
           -> Bool
           -> HomePackageTable
           -> IO SuccessFlag
-ghcjsLink env lc_cfg cfg extraJs buildJs ghcLink dflags logger tmp_fs unit_env batch_attempt_linking pt
+ghcjsLink env lc_cfg cfg hsc_env extraJs buildJs ghcLink logger tmp_fs unit_env batch_attempt_linking pt
   | ghcLink == LinkInMemory || ghcLink == NoLink =
       return Succeeded
   | ghcLink == LinkStaticLib || ghcLink == LinkDynLib =
       if buildJs && Maybe.isJust (lcLinkJsLib lc_cfg)
-         then ghcjsLinkJsLib lc_cfg extraJs dflags logger pt
+         then ghcjsLinkJsLib lc_cfg extraJs (hsc_dflags hsc_env) logger pt
          else return Succeeded
   | otherwise = do
       when (buildJs && Maybe.isJust (lcLinkJsLib lc_cfg))
-        (void $ ghcjsLinkJsLib lc_cfg extraJs dflags logger pt) -- FIXME Jeff: (2022,04): use return value and remove void
-      link' env lc_cfg cfg extraJs buildJs dflags logger tmp_fs unit_env batch_attempt_linking pt
+        (void $ ghcjsLinkJsLib lc_cfg extraJs (hsc_dflags hsc_env) logger pt) -- FIXME Jeff: (2022,04): use return value and remove void
+      link' env lc_cfg cfg hsc_env extraJs buildJs logger tmp_fs unit_env batch_attempt_linking pt
 
 ghcjsLinkJsLib :: JSLinkConfig
                -> [FilePath] -- ^ extra JS files
@@ -148,39 +187,19 @@ ghcjsLinkJsBinary :: GhcjsEnv
                   -> [UnitId]
                   -> IO ()
 ghcjsLinkJsBinary env lc_cfg cfg jsFiles _logger _tmpfs hsc_env _unit_env objs dep_pkgs =
-  void $ variantLink gen2Variant hsc_env env lc_cfg cfg exe mempty dep_pkgs objs' jsFiles isRoot mempty
+  void $ JSLink.link hsc_env env lc_cfg cfg exe mempty dep_pkgs objs' jsFiles isRoot mempty
     where
       objs'    = map ObjFile objs
       isRoot _ = True
-      exe      = jsExeFileName dflags
-      -- packageLibPaths :: UnitId -> [FilePath]
-      -- packageLibPaths = maybe [] libraryDirs . lookupInstalledPackage dflags
+      exe      = jsExeFileName (hsc_dflags hsc_env)
 
-{-
-isGhcjsPrimPackage :: DynFlags -> UnitId -> Bool
-isGhcjsPrimPackage dflags pkgKey
-  =  getInstalledPackageName dflags pkgKey == "ghcjs-prim" ||
-     (pkgKey == thisUnitId dflags &&
-      elem "-DBOOTING_PACKAGE=ghcjs-prim" (opt_P dflags))
-
-ghcjsPrimPackage :: DynFlags -> IO UnitId
-ghcjsPrimPackage dflags = do
-  keys <- BS.readFile filename
-  case Yaml.decodeEither keys of
-    Left _err -> error $ "could not read wired-in package keys from " ++ filename
-    Right m -> case M.lookup "ghcjs-prim" m of
-      Nothing -> error "Package `ghcjs-prim' is required to link executables"
-      Just k -> return (stringToPackageKey k)
-  where
-    filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
--}
 
 link' :: GhcjsEnv
       -> JSLinkConfig
       -> StgToJSConfig
+      -> HscEnv
       -> [FilePath]              -- extra js files
       -> Bool                    -- building JavaScript
-      -> DynFlags                -- dynamic flags
       -> Logger                  -- Logger
       -> TmpFs                   -- tmp file system
       -> UnitEnv                 -- Unit Environment
@@ -188,10 +207,11 @@ link' :: GhcjsEnv
       -> HomePackageTable        -- what to link
       -> IO SuccessFlag
 
-link' env lc_cfg cfg extraJs buildJs dflags logger tmp_fs unit_env batch_attempt_linking hpt
+link' env lc_cfg cfg hsc_env extraJs buildJs logger tmpfs unit_env batch_attempt_linking hpt
    | batch_attempt_linking
    = do
         let
+            dflags     = hsc_dflags hsc_env
             staticLink = case ghcLink dflags of
                           LinkStaticLib -> True
                           _ -> False
@@ -199,10 +219,12 @@ link' env lc_cfg cfg extraJs buildJs dflags logger tmp_fs unit_env batch_attempt
             home_mod_infos = eltsUDFM hpt
 
             -- the packages we depend on
-            pkg_deps  = concatMap (map fst . dep_pkgs . mi_deps . hm_iface) home_mod_infos
+            pkg_deps  = Set.toList . Set.unions
+                        $ dep_direct_pkgs . mi_deps . hm_iface
+                        <$> home_mod_infos
 
             -- the linkables to link
-            linkables = map (expectJust "link".hm_linkable) home_mod_infos
+            linkables = map (Maybe.expectJust "link".hm_linkable) home_mod_infos
         debugTraceMsg logger 3 (text "link: hmi ..." $$ vcat (map (ppr . mi_module . hm_iface) home_mod_infos))
         debugTraceMsg logger 3 (text "link: pkgdeps ..." $$ vcat (map ppr pkg_deps))
         debugTraceMsg logger 3 (text "link: linkables are ..." $$ vcat (map ppr linkables))
@@ -218,12 +240,16 @@ link' env lc_cfg cfg extraJs buildJs dflags logger tmp_fs unit_env batch_attempt
                 obj_files             = concatMap getOfiles linkables
                 exe_file              = exeFileName (targetPlatform dflags) staticLink (outputFile_ dflags)
 
-            linking_needed <- linkingNeeded logger dflags staticLink unit_env linkables pkg_deps
+            linking_needed <- linkingNeeded logger dflags unit_env staticLink linkables pkg_deps
+                              <&> (\case
+                                    NeedsRecompile _reason -> True
+                                    _                      -> False)
+
 
             if not (gopt Opt_ForceRecomp dflags) && not linking_needed
               then
               do
-                debugTraceMsg logger 2 (text exe_file <+> ptext (sLit "is up to date, linking not required."))
+                debugTraceMsg logger 2 (text exe_file <+> text "is up to date, linking not required.")
                 return Succeeded
               else
               do
@@ -237,10 +263,10 @@ link' env lc_cfg cfg extraJs buildJs dflags logger tmp_fs unit_env batch_attempt
                 -- functions. Untangle this later!
                 let link = case ghcLink dflags of
                       LinkBinary    -> if buildJs
-                                       then ghcjsLinkJsBinary env lc_cfg cfg extraJs logger tmp_fs hsc_env unit_env
-                                       else linkBinary False                         logger tmp_fs (hsc_dflags hsc_env) unit_env
-                      LinkStaticLib -> linkStaticLib   logger tmp_fs hsc_env unit_env
-                      LinkDynLib    -> linkDynLibCheck logger tmp_fs hsc_env unit_env
+                                       then ghcjsLinkJsBinary env lc_cfg cfg extraJs logger tmpfs hsc_env unit_env
+                                       else linkBinary                               logger tmpfs (hsc_dflags hsc_env) unit_env
+                      LinkStaticLib -> jsLinkStaticLib   logger tmpfs hsc_env unit_env
+                      LinkDynLib    -> linkDynLibCheck logger tmpfs hsc_env unit_env
                       other         -> panicBadLink other
 
                 _ <- link obj_files pkg_deps
@@ -255,79 +281,36 @@ link' env lc_cfg cfg extraJs buildJs dflags logger tmp_fs unit_env batch_attempt
         return Succeeded
 
 
-linkingNeeded :: Logger -> DynFlags -> Bool -> UnitEnv -> [Linkable] -> [UnitId] -> IO Bool
-linkingNeeded logger dflags staticLink unit_env linkables pkg_deps = do
-        -- if the modification time on the executable is later than the
-        -- modification times on all of the objects and libraries, then omit
-        -- linking (unless the -fforce-recomp flag was given).
-  let exe_file = exeFileName (targetPlatform dflags) staticLink (outputFile_ dflags)
-  e_exe_time <- tryIO $ getModificationUTCTime exe_file
-  case e_exe_time of
-    Left _  -> return True
-    Right t -> do
-        -- first check object files and extra_ld_inputs
-        let extra_ld_inputs = [ f | FileOption _ f <- ldInputs dflags ]
-        e_extra_times <- mapM (tryIO . getModificationUTCTime) extra_ld_inputs
-        let (errs,extra_times) = partitionEithers e_extra_times
-        let obj_times =  map linkableTime linkables ++ extra_times
-        if not (null errs) || any (t <) obj_times
-            then return True
-            else do
-
-          -- next, check libraries. XXX this only checks Haskell libraries,
-          -- not extra_libraries or -l things from the command line.
-          let pkg_hslibs  = [ (libraryDirs c, lib)
-                            | Just c <- map (lookupInstalledPackage dflags) pkg_deps
-                            , lib <- packageHsLibs dflags c
-                            ]
-
-          pkg_libfiles <- mapM (uncurry (findHSLib dflags)) pkg_hslibs
-          if any isNothing pkg_libfiles
-            then return True
-            else
-            do
-              e_lib_times <- mapM (tryIO . getModificationUTCTime) (catMaybes pkg_libfiles)
-              let (lib_errs,lib_times) = partitionEithers e_lib_times
-              if not (null lib_errs) || any (t <) lib_times
-                then return True
-                else checkLinkInfo logger dflags unit_env pkg_deps exe_file
-
 panicBadLink :: GhcLink -> a
 panicBadLink other = panic ("link: GHC not built to link this way: " ++
                             show other)
 
 linkDynLibCheck :: Logger -> TmpFs -> HscEnv -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
-linkDynLibCheck logger _tmpfs hsc_env _unit_env o_files dep_packages
+linkDynLibCheck logger tmpfs hsc_env unit_env o_files dep_packages
  = do
     let dflags = hsc_dflags hsc_env
     when (haveRtsOptsFlags dflags) $
       logOutput logger (text "Warning: -rtsopts and -with-rtsopts have no effect with -shared."
                         $$ text "    Call hs_init_ghc() from your main() function to set these options.")
 
-    linkDynLib dflags o_files dep_packages
+    linkDynLib logger tmpfs (hsc_dflags hsc_env) unit_env o_files dep_packages
 
-linkStaticLib ::Logger -> TmpFs -> HscEnv -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
-linkStaticLib logger _tmpfs hsc_env _unit_env o_files dep_packages
+-- FIXME: Jeff: (2022,04): This function is possibly redundant. Compare to
+-- GHC.Linker.Static.linkStaticLib and decide and remove
+jsLinkStaticLib ::Logger -> TmpFs -> HscEnv -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
+jsLinkStaticLib logger tmpfs hsc_env _unit_env o_files dep_packages
   = -- XXX looks like this needs to be updated
 {-
  = do
     when (platformOS (targetPlatform dflags) `notElem` [OSiOS, OSDarwin]) $
       throwGhcExceptionIO (ProgramError "Static archive creation only supported on Darwin/OS X/iOS")
 -}
-    jsLinkBinary' True logger (hsc_dflags hsc_env) o_files dep_packages
+    jsLinkBinary' True logger tmpfs (hsc_dflags hsc_env) (hsc_unit_env hsc_env) o_files dep_packages
 
-findHSLib :: DynFlags -> [String] -> String -> IO (Maybe FilePath)
-findHSLib dflags dirs lib = do
-  let batch_lib_file = if ghcLink dflags == LinkStaticLib
-                       then "lib" ++ lib <.> "a"
-                       else mkSOName (targetPlatform dflags) lib
-  found <- filterM doesFileExist (map (</> batch_lib_file) dirs)
-  case found of
-    [] -> return Nothing
-    (x:_) -> return (Just x)
-
-jsLinkBinary' :: Bool -> Logger -> DynFlags -> [FilePath] -> [UnitId] -> IO ()
-jsLinkBinary' staticLink logger dflags o_files dep_packages = do
+-- FIXME: Jeff: (2022,04): This function may be a duplicate functions from
+-- GHC.Linker.Static.linkBinary. Decide if that is the case and remove
+jsLinkBinary' :: Bool -> Logger -> TmpFs -> DynFlags -> UnitEnv -> [FilePath] -> [UnitId] -> IO ()
+jsLinkBinary' staticLink logger tmpfs dflags unit_env o_files dep_packages = do
     let platform = targetPlatform dflags
         mySettings = settings     dflags
         verbFlags = getVerbFlags  dflags
@@ -342,7 +325,9 @@ jsLinkBinary' staticLink logger dflags o_files dep_packages = do
                       then return output_fn
                       else do d <- getCurrentDirectory
                               return $ normalise (d </> output_fn)
-    pkg_lib_paths <- getPackageLibraryPath dflags dep_packages
+    pkg_lib_paths <- collectLibraryDirs (ways dflags)
+                     <$> mayThrowUnitErr (preloadUnitsInfo' unit_env dep_packages)
+
     let pkg_lib_path_opts = concatMap get_pkg_lib_path_opts pkg_lib_paths
         get_pkg_lib_path_opts l
          | osElfTarget (platformOS platform) &&
@@ -384,8 +369,9 @@ jsLinkBinary' staticLink logger dflags o_files dep_packages = do
     let lib_paths = libraryPaths dflags
     let lib_path_opts = map ("-L"++) lib_paths
 
-    extraLinkObj <- mkExtraObjToLinkIntoBinary dflags
-    noteLinkObjs <- mkNoteObjsToLinkIntoBinary dflags dep_packages
+    extraLinkObj <- Maybe.fromMaybe mempty
+                    <$> mkExtraObjToLinkIntoBinary logger tmpfs dflags (ue_units unit_env)
+    noteLinkObjs <- mkNoteObjsToLinkIntoBinary logger tmpfs dflags unit_env dep_packages
 
     let
       (pre_hs_libs, post_hs_libs)
@@ -398,7 +384,7 @@ jsLinkBinary' staticLink logger dflags o_files dep_packages = do
         = ([],[])
 
     pkg_link_opts <- do
-        (package_hs_libs, extra_libs, other_flags) <- getPackageLinkOpts dflags dep_packages
+        (package_hs_libs, extra_libs, other_flags) <- getUnitLinkOpts dflags unit_env dep_packages
         return $ if staticLink
             then package_hs_libs -- If building an executable really means making a static
                                  -- library (e.g. iOS), then we only keep the -l options for
@@ -420,7 +406,7 @@ jsLinkBinary' staticLink logger dflags o_files dep_packages = do
                  -- that defines the symbol."
 
     -- frameworks
-    pkg_framework_opts <- getPkgFrameworkOpts dflags platform dep_packages
+    pkg_framework_opts <- getUnitFrameworkOpts unit_env dep_packages
     let framework_opts = getFrameworkOpts dflags platform
 
         -- probably _stub.o files
@@ -444,9 +430,9 @@ jsLinkBinary' staticLink logger dflags o_files dep_packages = do
                         ]
                     | otherwise               = []
 
-    rc_objs <- maybeCreateManifest dflags output_fn
+    rc_objs <- maybeCreateManifest logger tmpfs dflags output_fn
 
-    -- FIXME: Jeff (2022,04): linkBinary' is only ever called with staticLink ==
+    -- FIXME: Jeff (2022,04): jsLinkBinary' is only ever called with staticLink ==
     -- True. However, if it were False I'm unsure how to create the TmpFS
     -- parameter required by SysTools.runLink. Is this necessary for the
     -- js-backend? Fix this when we know more.
@@ -562,7 +548,7 @@ ghcjsDoLink env lc_cfg cfg hsc_env stop_phase o_files
           putStrLn $ "ghcjsDoLink: " ++ show (map unitIdString dep_package_ids)
 
           void $
-            variantLink gen2Variant
+              JSLink.link
               hsc_env
               env
               lc_cfg
@@ -576,201 +562,3 @@ ghcjsDoLink env lc_cfg cfg hsc_env stop_phase o_files
               mempty                        -- extra symbols to link in
 
         _other      -> panicBadLink _other
-
-
-{-
-ghcjsLinkJsBinary :: GhcjsEnv
-                  -> GhcjsSettings
-                  -> [FilePath]
-                  -> DynFlags
-                  -> [FilePath]
-                  -> [UnitId]
-                  -> IO ()
--}
-
-{-
-link :: DynFlags
-     -> GhcjsEnv
-     -> GhcjsSettings
-     -> FilePath                   -- ^ output file/directory
-     -> [FilePath]                 -- ^ include path for home package
-     -> [UnitId]          -- ^ packages to link
-     -> [LinkedObj]                -- ^ the object files we're linking
-     -> [FilePath]                 -- ^ extra js files to include
-     -> (Fun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
-     -> Set Fun                    -- ^ extra symbols to link in
-     -> IO ()
--}
-
-{-
-
-ghcjsLinkBinary :: DynFlags -> [FilePath] -> [UnitId] -> IO ()
-ghcjsLinkBinary = ghcjsLinkBinary' False
-
-ghcjsLinkBinary' :: Bool -> DynFlags -> [FilePath] -> [UnitId] -> IO ()
-ghcjsLinkBinary' staticLink dflags o_files dep_packages = do
-    let platform = targetPlatform dflags
-        toolSettings' = toolSettings dflags
-        verbFlags = getVerbFlags dflags
-        output_fn = exeFileName staticLink dflags
-
-    -- get the full list of packages to link with, by combining the
-    -- explicit packages with the auto packages and all of their
-    -- dependencies, and eliminating duplicates.
-
-    full_output_fn <- if isAbsolute output_fn
-                      then return output_fn
-                      else do d <- getCurrentDirectory
-                              return $ normalise (d </> output_fn)
-    -- pkg_lib_paths <- getPackageLibraryPath dflags dep_packages
-    pkg_lib_paths <- getPreloadPackagesAnd dflags dep_packages
-    putStrLn $ "output fn: " ++ show full_output_fn
-    putStrLn $ "lib paths: " ++ show pkg_lib_paths
-    let pkg_lib_path_opts = concatMap get_pkg_lib_path_opts pkg_lib_paths
-        get_pkg_lib_path_opts l = ["-L" ++ l]
-
-    pkg_lib_path_opts <-
-      if gopt Opt_SingleLibFolder dflags
-      then do
-        libs <- getLibs dflags dep_packages
-        tmpDir <- newTempDir dflags
-        sequence_ [ copyFile lib (tmpDir </> basename)
-                  | (lib, basename) <- libs]
-        return [ "-L" ++ tmpDir ]
-      else pure pkg_lib_path_opts
-
-    let
-      dead_strip
-        | gopt Opt_WholeArchiveHsLibs dflags = []
-        | otherwise = if osSubsectionsViaSymbols (platformOS platform)
-                        then ["-Wl,-dead_strip"]
-                        else []
-    let lib_paths = libraryPaths dflags
-    let lib_path_opts = map ("-L"++) lib_paths
-
-    extraLinkObj <- mkExtraObjToLinkIntoBinary dflags
-    noteLinkObjs <- mkNoteObjsToLinkIntoBinary dflags dep_packages
-
-    let
-      (pre_hs_libs, post_hs_libs)
-        | gopt Opt_WholeArchiveHsLibs dflags
-        = if platformOS platform == OSDarwin
-            then (["-Wl,-all_load"], [])
-              -- OS X does not have a flag to turn off -all_load
-            else (["-Wl,--whole-archive"], ["-Wl,--no-whole-archive"])
-        | otherwise
-        = ([],[])
-
-    pkg_link_opts <- do
-        (package_hs_libs, extra_libs, other_flags) <- getPackageLinkOpts dflags dep_packages
-        return $ if staticLink
-            then package_hs_libs -- If building an executable really means making a static
-                                 -- library (e.g. iOS), then we only keep the -l options for
-                                 -- HS packages, because libtool doesn't accept other options.
-                                 -- In the case of iOS these need to be added by hand to the
-                                 -- final link in Xcode.
-            else other_flags ++ dead_strip
-                  ++ pre_hs_libs ++ package_hs_libs ++ post_hs_libs
-                  ++ extra_libs
-                 -- -Wl,-u,<sym> contained in other_flags
-                 -- needs to be put before -l<package>,
-                 -- otherwise Solaris linker fails linking
-                 -- a binary with unresolved symbols in RTS
-                 -- which are defined in base package
-                 -- the reason for this is a note in ld(1) about
-                 -- '-u' option: "The placement of this option
-                 -- on the command line is significant.
-                 -- This option must be placed before the library
-                 -- that defines the symbol."
-
-    -- frameworks
-    pkg_framework_opts <- getPkgFrameworkOpts dflags platform dep_packages
-    let framework_opts = getFrameworkOpts dflags platform
-
-        -- probably _stub.o files
-    let extra_ld_inputs = ldInputs dflags
-
-    rc_objs <- maybeCreateManifest dflags output_fn
-
-    let link dflags args | staticLink = SysTools.runLibtool dflags args
-                         | platformOS platform == OSDarwin
-                            = SysTools.runLink dflags args >> SysTools.runInjectRPaths dflags pkg_lib_paths output_fn
-                         | otherwise
-                            = SysTools.runLink dflags args
-
-    link dflags (
-                       map SysTools.Option verbFlags
-                      ++ [ SysTools.Option "-o"
-                         , SysTools.FileOption "" output_fn
-                         ]
-                      ++ libmLinkOpts
-                      ++ map SysTools.Option (
-                         []
-
-                      -- See Note [No PIE when linking]
-                      ++ picCCOpts dflags
-
-                      -- Permit the linker to auto link _symbol to _imp_symbol.
-                      -- This lets us link against DLLs without needing an "import library".
-                      ++ (if platformOS platform == OSMinGW32
-                          then ["-Wl,--enable-auto-import"]
-                          else [])
-
-                      -- '-no_compact_unwind'
-                      -- C++/Objective-C exceptions cannot use optimised
-                      -- stack unwinding code. The optimised form is the
-                      -- default in Xcode 4 on at least x86_64, and
-                      -- without this flag we're also seeing warnings
-                      -- like
-                      --     ld: warning: could not create compact unwind for .LFB3: non-standard register 5 being saved in prolog
-                      -- on x86.
-                      ++ (if toolSettings_ldSupportsCompactUnwind toolSettings' &&
-                             not staticLink &&
-                             (platformOS platform == OSDarwin) &&
-                             case platformArch platform of
-                               ArchX86     -> True
-                               ArchX86_64  -> True
-                               ArchARM {}  -> True
-                               ArchAArch64 -> True
-                               _ -> False
-                          then ["-Wl,-no_compact_unwind"]
-                          else [])
-
-                      -- '-Wl,-read_only_relocs,suppress'
-                      -- ld gives loads of warnings like:
-                      --     ld: warning: text reloc in _base_GHCziArr_unsafeArray_info to _base_GHCziArr_unsafeArray_closure
-                      -- when linking any program. We're not sure
-                      -- whether this is something we ought to fix, but
-                      -- for now this flags silences them.
-                      ++ (if platformOS   platform == OSDarwin &&
-                             platformArch platform == ArchX86 &&
-                             not staticLink
-                          then ["-Wl,-read_only_relocs,suppress"]
-                          else [])
-
-                      ++ (if toolSettings_ldIsGnuLd toolSettings' &&
-                             not (gopt Opt_WholeArchiveHsLibs dflags)
-                          then ["-Wl,--gc-sections"]
-                          else [])
-
-                      ++ o_files
-                      ++ lib_path_opts)
-                      ++ extra_ld_inputs
-                      ++ map SysTools.Option (
-                         rc_objs
-                      ++ framework_opts
-                      ++ pkg_lib_path_opts
-                      ++ extraLinkObj:noteLinkObjs
-                      ++ pkg_link_opts
-                      ++ pkg_framework_opts
-                      ++ (if platformOS platform == OSDarwin
-                          --  dead_strip_dylibs, will remove unused dylibs, and thus save
-                          --  space in the load commands. The -headerpad is necessary so
-                          --  that we can inject more @rpath's later for the left over
-                          --  libraries during runInjectRpaths phase.
-                          --
-                          --  See Note [Dynamic linking on macOS].
-                          then [ "-Wl,-dead_strip_dylibs", "-Wl,-headerpad,8000" ]
-                          else [])
-                    ))
--}

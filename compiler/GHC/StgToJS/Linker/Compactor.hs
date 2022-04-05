@@ -21,9 +21,10 @@
 -- - rewrite all variables starting with h$$ to shorter names, these are internal names
 -- - write all function metadata compactly
 --
--- TODO: Jeff (2022,03): adapt to GHC Head. We skip this for now and live with
--- an unoptimized linker. Once the Linker and RTS are up and running return to
--- this and optimize
+-- TODO: Jeff (2022,03): I've adapted this to ghcHEAD but have not actually
+-- implemented the compactor. The key work function is @packString@ which
+-- currently explodes if called. The todo is to fix this, and actually implement
+-- the compactor once we have a linker that actually works.
 -----------------------------------------------------------------------------
 
 module GHC.StgToJS.Linker.Compactor
@@ -68,6 +69,7 @@ import           GHC.StgToJS.Printer             (pretty)
 import           GHC.StgToJS.Types
 import           GHC.StgToJS.Linker.Types
 import           GHC.StgToJS.CoreUtils
+import           GHC.StgToJS.Closure
 import           GHC.StgToJS.Arg()
 
 import Prelude

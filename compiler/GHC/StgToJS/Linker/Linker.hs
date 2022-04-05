@@ -17,12 +17,40 @@
 -- GHCJS linker, collects dependencies from the object files (.js_o, js_p_o),
 -- which contain linkable units with dependency information
 --
+----------------------------- FIXMEs -------------------------------------------
 -- FIXME: Jeff (2022,03): Finish module description. Specifically:
 -- 1. What are the important modules this module uses
 -- 2. Who is the consumer for this module (hint: DynamicLinking)
 -- 3. What features are missing due to the implementation in this module? For
 -- example, Are we blocked from linking foreign imports due to some code in this
 -- module?
+--
+--  - add ForeignRefs imports in @link@
+--  - factor out helper functions in @link'@
+--  - remove @head@ function in @link'@
+--  - remove @ue_unsafeHomeUnit@ function in @link'@
+--  - use newtypes instead of strings for output directories in @writeRunner@
+--  - add support for windows in @writeRunner@
+--  - resolve strange unpack call in @writeExterns@ the right thing to do here
+--      might be to just remove it
+--  - fix: @collectDeps@ inputs a [UnitId], but [] is unordered yet comments in
+--      @collectDeps@ indicate a specific ordering is needed. This ordering
+--      should be enforced in some data structure other than [] which is
+--      obviously ordered but in an undefined and ad-hoc way
+--  - fix: For most of the Linker I pass around UnitIds, I (Jeff) am unsure if
+--      these should really be modules. Or to say this another way is UnitId the
+--      right abstraction level? Or is Module? Or some other unit thing?
+--  - fix: Gen2.GHCJS used NFData instances over a lot of types. Replicating
+--      these instances would mean adding a Generic and NFData instance to some
+--      internal GHC types. I (Jeff) do not think we want to do that. Instead, we
+--      should use strict data structures as a default and then implement lazy
+--      ones where it makes sense and only if it makes sense. IMHO Gen2.GHCJS was
+--      overly lazy and we should avoid repeating that here. Let profiling be our
+--      guide during our performance refactoring.
+--  - Employ the type system more effectively for @readSystemDeps'@, in
+--      particular get rid of the string literals
+--  - fix foldl' memory leak in @staticDeps@
+--  - move @mkSymb@
 -----------------------------------------------------------------------------
 
 module GHC.StgToJS.Linker.Linker where
@@ -390,9 +418,7 @@ writeRunner _settings out =
   -- else do
   ---------------------------------------------
   src <- B.readFile (cd </> srcFile)
-  -- let pgm = TE.encodeUtf8 (T.pack $ nodeProgram nodeSettings)
   B.writeFile runner ("#!/usr/bin/env " <> nodePgm <> "\n" <> src)
-  -- FIXME: Jeff (2022,03): set the runner file as an executable in the file system
   perms <- getPermissions runner
   setPermissions runner (perms {executable = True})
 

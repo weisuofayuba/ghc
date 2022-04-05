@@ -31,7 +31,7 @@
 --  The base contains a CompactorState for consistent renaming of private names
 --  and packed initialization of info tables and static closures.
 
--- FIXMEs
+----------------------------- FIXMEs -------------------------------------------
 --  - Find a better data structure for linkerArchiveDeps
 --  - Specialize Functor instances for helpers
 --  - Better name for Base

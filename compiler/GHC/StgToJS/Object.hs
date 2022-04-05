@@ -18,6 +18,7 @@
 -- Maintainer  :  Sylvain Henry  <sylvain.henry@iohk.io>
 --                Jeffrey Young  <jeffrey.young@iohk.io>
 --                Luite Stegeman <luite.stegeman@iohk.io>
+--                Josh Meredith  <josh.meredith@iohk.io>
 -- Stability   :  experimental
 --
 --  Serialization/deserialization of binary .o files for the JavaScript backend
@@ -32,7 +33,6 @@
 --   - header ["GHCJSOBJ", length of symbol table, length of dependencies, length of index]
 --   - compiler version tag
 --   - symbol table
-
 --   - dependency info
 --   - closureinfo index
 --   - closureinfo data (offsets described by index)
