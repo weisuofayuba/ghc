@@ -72,7 +72,7 @@ INFO_TABLE_RET(stg_stop_thread, STOP_FRAME,
 
     Sp = Sp + SIZEOF_StgStopFrame - WDS(2);
     Sp(1) = R1;
-    Sp(0) = stg_enter_info;
+    Sp(0) = stg_dead_thread_info;
 
     StgTSO_what_next(CurrentTSO) = ThreadComplete::I16;
 

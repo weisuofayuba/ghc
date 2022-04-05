@@ -409,6 +409,9 @@ INFO_TABLE_RET( stg_apply_interp, RET_BCO )
     jump stg_yield_to_interpreter [];
 }
 
+INFO_TABLE_RET( stg_dead_thread, RET_SMALL )
+{ foreign "C" barf("stg_dead_thread entered!") never returns; }
+
 /* ----------------------------------------------------------------------------
    Entry code for a BCO
    ------------------------------------------------------------------------- */
