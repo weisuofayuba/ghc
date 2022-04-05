@@ -88,9 +88,10 @@ data Backend
 -- | Default backend to use for the given platform.
 platformDefaultBackend :: Platform -> Backend
 platformDefaultBackend platform = if
-      | platformUnregisterised platform -> ViaC
-      | platformNcgSupported platform   -> NCG
-      | otherwise                       -> LLVM
+  | platformUnregisterised platform         -> ViaC
+  | platformNcgSupported platform           -> NCG
+  | platformArch platform == ArchJavaScript -> JavaScript
+  | otherwise                               -> LLVM
 
 
 -- | Is the platform supported by the Native Code Generator?
