@@ -671,7 +671,12 @@ The critical part of desugaring is to identify T and then T1/T4.
 tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_ty
   = assert (notNull rbnds) $
     do  { -- STEP -2: typecheck the record_expr, the record to be updated
-          (_, record_rho) <- tcScalingUsage Many $ tcInferRho record_expr
+          -- This step is a to feed `disambiguateRecordBinds`. However no context
+          -- is given to `tcInferRho` for the moment, which will cause trouble.
+          -- A temporary hack is adopted before GHC proposal #336 is implemented.
+          ((_, record_rho), _lie) <- captureConstraints $
+                                     tcScalingUsage Many $
+                                     tcInferRho record_expr
             -- Record update drops some of the content of the record (namely the
             -- content of the field being updated). As a consequence, unless the
             -- field being updated is unrestricted in the record, or we need an
