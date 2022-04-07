@@ -398,7 +398,8 @@ makePending flavour n (HsQuasiQuote quoter quote)
   = PendingRnSplice flavour n (mkQuasiQuoteExpr flavour quoter quote)
 
 ------------------
-mkQuasiQuoteExpr :: UntypedSpliceFlavour -> Name -> Located FastString
+mkQuasiQuoteExpr :: UntypedSpliceFlavour -> Name
+                 -> XRec GhcPs FastString
                  -> LHsExpr GhcRn
 -- Return the expression (quoter "...quote...")
 -- which is what we must run in a quasi-quote
@@ -409,7 +410,7 @@ mkQuasiQuoteExpr flavour quoter (L q_span' quote)
                                 quoterExpr)
                     quoteExpr
   where
-    q_span = noAnnSrcSpan q_span'
+    q_span = noAnnSrcSpan (locA q_span')
     quoterExpr = L q_span $! HsVar noExtField $! (L (la2na q_span) quoter)
     quoteExpr  = L q_span $! HsLit noComments $! HsString NoSourceText quote
     quote_selector = case flavour of
