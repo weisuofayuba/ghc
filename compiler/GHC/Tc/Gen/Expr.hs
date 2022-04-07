@@ -48,7 +48,7 @@ import GHC.Tc.Gen.Bind        ( tcLocalBinds )
 import GHC.Tc.Instance.Family ( tcGetFamInstEnvs )
 import GHC.Core.FamInstEnv    ( FamInstEnvs )
 import GHC.Rename.Expr        ( mkExpandedExpr )
-import GHC.Rename.Env         ( addUsedGRE, lookupConstructorFields )
+import GHC.Rename.Env         ( addUsedGRE )
 import GHC.Tc.Utils.Env
 import GHC.Tc.Gen.Arrow
 import GHC.Tc.Gen.Match
@@ -730,14 +730,15 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
                              _  -> panic "tcRecordUpd"
                 -- NB: for a data type family, the tycon is the instance tycon
 
-              relevant_cons = map conLikeName $ conLikesWithFields con_likes upd_fld_occs
+              relevant_cons = conLikesWithFields con_likes upd_fld_occs
                 -- A constructor is only relevant to this process if
                 -- it contains *all* the fields that are being updated
                 -- Other ones will cause a runtime error if they occur
-              make_pat :: Name -> TcM (LMatch GhcRn (LHsExpr GhcRn))
-              make_pat con = do {
-                                 con_fields <- lookupConstructorFields con
-                                ; let con_fld_names = map flSelector con_fields
+              make_pat :: ConLike -> TcM (LMatch GhcRn (LHsExpr GhcRn))
+              make_pat conLike = do {
+                                ; let con_fields = conLikeFieldLabels conLike
+                                      con = conLikeName conLike
+                                      con_fld_names = map flSelector con_fields
                                       con_fld_occ_names = map occName con_fld_names
                                 ; con_field_names <- mapM newSysName con_fld_occ_names
                                 ; let con_fld_vars = map genLHsVar con_field_names
