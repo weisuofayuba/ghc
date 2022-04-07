@@ -439,19 +439,37 @@ compiled program.
     details.
 
 .. ghc-flag:: -fprof-late
-    :shortdesc: Auto-add ``SCC``\\ s to all top level bindings *after* the optimizer has run.
+    :shortdesc: Auto-add ``SCC``\\ s to all top level bindings *after* the core pipeline has run.
     :type: dynamic
     :reverse: -fno-prof-late
     :category:
 
     :since: 9.4.1
 
-    Adds an automatic ``SCC`` annotation to all top level bindings late in the core pipeline after
-    the optimizer has run. This means these cost centres will not interfere with core-level optimizations
+    Adds an automatic ``SCC`` annotation to all top level bindings late in the compilation pipeline after
+    the optimizer has run and unfoldings have been created. This means these cost centres will not interfere with core-level optimizations
     and the resulting profile will be closer to the performance profile of an optimized non-profiled
     executable.
     While the results of this are generally very informative some of the compiler internal names
-    will leak into the profile.
+    will leak into the profile and functions which are fully inlined might disappear from the profile completely and their cost will be absorbed
+    into their call site.
+
+.. ghc-flag:: -fprof-late-inline
+    :shortdesc: Auto-add ``SCC``\\ s to all top level bindings *after* the optimizer has run and retain them when inlining.
+    :type: dynamic
+    :reverse: -fno-prof-late-inline
+    :category:
+
+    :since: 9.4.1
+
+    Adds an automatic ``SCC`` annotation to all top level bindings late in the core pipeline after
+    the optimizer has run. This is basically the same as :ghc-flag:`-fprof-late` except cost centers are included in unfoldings.
+
+    The result of which is that cost centers *can* inhibit core optimizations to some degree at use sites
+    after inlining. Further there can be significant overhead from cost centres added to small functions if they get inlined a lot
+    of times.
+
+    Use this mode if :ghc-flag:`-fprof-late` results in a profile that's too hard to interpret.
 
 .. ghc-flag:: -fprof-cafs
     :shortdesc: Auto-add ``SCC``\\ s to all CAFs
