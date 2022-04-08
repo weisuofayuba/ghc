@@ -12,7 +12,6 @@ module GHC.Hs.Expr where
 import GHC.Utils.Outputable ( SDoc, Outputable )
 import Language.Haskell.Syntax.Pat ( LPat )
 import {-# SOURCE #-} GHC.Hs.Pat () -- for Outputable
-import Language.Haskell.Syntax.Decls ( SpliceDecoration(..) )
 import Language.Haskell.Syntax.Extension ( IdP )
 import Language.Haskell.Syntax.Expr
   ( HsExpr, LHsExpr
@@ -23,6 +22,7 @@ import Language.Haskell.Syntax.Expr
   )
 import GHC.Hs.Extension ( OutputableBndrId, GhcPass )
 import Data.Kind  ( Type )
+import Data.Bool  ( Bool )
 
 instance (OutputableBndrId p) => Outputable (HsExpr (GhcPass p))
 instance (OutputableBndrId p) => Outputable (HsCmd (GhcPass p))
@@ -32,10 +32,7 @@ pprLExpr :: (OutputableBndrId p) => LHsExpr (GhcPass p) -> SDoc
 pprExpr :: (OutputableBndrId p) => HsExpr (GhcPass p) -> SDoc
 
 pprTypedSplice   :: (OutputableBndrId p) => IdP (GhcPass p) -> LHsExpr (GhcPass p) -> SDoc
-pprUntypedSplice :: (OutputableBndrId p) => HsUntypedSplice (GhcPass p) -> SDoc
-
-pprSpliceDecl ::  (OutputableBndrId p)
-          => HsUntypedSplice (GhcPass p) -> SpliceDecoration -> SDoc
+pprUntypedSplice :: (OutputableBndrId p) => Bool -> HsUntypedSplice (GhcPass p) -> SDoc
 
 pprPatBind :: forall bndr p . (OutputableBndrId bndr,
                                OutputableBndrId p)

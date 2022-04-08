@@ -319,7 +319,7 @@ pprPat (NPlusKPat _ n k _ _ _)  = hcat [ppr_n, char '+', ppr k]
                   GhcPs -> ppr n
                   GhcRn -> ppr n
                   GhcTc -> ppr n
-pprPat (SplicePat _ splice)     = pprUntypedSplice splice
+pprPat (SplicePat _ splice)     = pprUntypedSplice True splice
 pprPat (SigPat _ pat ty)        = ppr pat <+> dcolon <+> ppr ty
 pprPat (ListPat _ pats)         = brackets (interpp'SP pats)
 pprPat (TuplePat _ pats bx)

@@ -1035,7 +1035,7 @@ ppr_mono_ty (HsKindSig _ ty kind)
   = ppr_mono_lty ty <+> dcolon <+> ppr kind
 ppr_mono_ty (HsListTy _ ty)       = brackets (ppr_mono_lty ty)
 ppr_mono_ty (HsIParamTy _ n ty)   = (ppr n <+> dcolon <+> ppr_mono_lty ty)
-ppr_mono_ty (HsSpliceTy _ s)      = pprUntypedSplice s
+ppr_mono_ty (HsSpliceTy _ s)      = pprUntypedSplice True s
 ppr_mono_ty (HsExplicitListTy _ prom tys)
   | isPromoted prom = quote $ brackets (maybeAddSpace tys $ interpp'SP tys)
   | otherwise       = brackets (interpp'SP tys)

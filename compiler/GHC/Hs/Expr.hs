@@ -721,7 +721,7 @@ ppr_expr (HsTypedSplice ext e)   = undefined
     --   GhcPs | (_, _, n) <- ext -> pprTypedSplice n e
     --   GhcRn | (_, _, n) <- ext -> pprTypedSplice n e
     --   GhcTc | (n, _)    <- ext -> pprTypedSplice n e
-ppr_expr (HsUntypedSplice _ s) = pprUntypedSplice s
+ppr_expr (HsUntypedSplice _ s) = pprUntypedSplice True s
 
 ppr_expr (HsTypedBracket b e)
   = case ghcPass @p of
@@ -1915,28 +1915,22 @@ checker:
 -}
 
 instance (OutputableBndrId p) => Outputable (HsUntypedSplice (GhcPass p)) where
-  ppr s = pprUntypedSplice s
+  ppr s = pprUntypedSplice True s
 
 pprPendingSplice :: (OutputableBndrId p)
                  => SplicePointName -> LHsExpr (GhcPass p) -> SDoc
 pprPendingSplice n e = angleBrackets (ppr n <> comma <+> ppr (stripParensLHsExpr e))
 
-pprSpliceDecl ::  (OutputableBndrId p)
-          => HsUntypedSplice (GhcPass p) -> SpliceDecoration -> SDoc
-pprSpliceDecl e@HsQuasiQuote{} _ = pprUntypedSplice e
-pprSpliceDecl e DollarSplice = text "$" <> pprUntypedSplice e
-pprSpliceDecl e BareSplice = pprUntypedSplice e
-
 pprTypedSplice :: (OutputableBndrId p) => IdP (GhcPass p) -> LHsExpr (GhcPass p) -> SDoc
-pprTypedSplice n e = ppr_splice (text "$$") n e empty
+pprTypedSplice n e = ppr_splice (text "$$") n e
 
-pprUntypedSplice :: forall p. (OutputableBndrId p) => HsUntypedSplice (GhcPass p) -> SDoc
-pprUntypedSplice (HsUntypedSpliceExpr _ e) = undefined
-  -- ROMES:TODO: Pretty print without IdP
-  -- = ppr_splice (text "$") n e empty
-pprUntypedSplice (HsQuasiQuote q s) = undefined
-  -- ROMES:TODO: Pretty print without IdP
-  -- = ppr_quasi n q (unLoc s)
+pprUntypedSplice :: forall p. (OutputableBndrId p)
+                 => Bool -- Whether to preceed the splice with "$"
+                 -> HsUntypedSplice (GhcPass p)
+                 -> SDoc
+pprUntypedSplice True  (HsUntypedSpliceExpr _ e) = ppr_splice (text "$") undefined e
+pprUntypedSplice False (HsUntypedSpliceExpr _ e) = ppr_splice empty undefined e
+pprUntypedSplice _ (HsQuasiQuote q s)            = ppr_quasi undefined q (unLoc s)
 
 ppr_quasi :: OutputableBndr p => p -> p -> FastString -> SDoc
 ppr_quasi n quoter quote = whenPprDebug (brackets (ppr n)) <>
@@ -1944,9 +1938,9 @@ ppr_quasi n quoter quote = whenPprDebug (brackets (ppr n)) <>
                            ppr quote <> text "|]"
 
 ppr_splice :: (OutputableBndrId p)
-           => SDoc -> (IdP (GhcPass p)) -> LHsExpr (GhcPass p) -> SDoc -> SDoc
-ppr_splice herald n e trail
-    = herald <> whenPprDebug (brackets (ppr n)) <> ppr e <> trail
+           => SDoc -> (IdP (GhcPass p)) -> LHsExpr (GhcPass p) -> SDoc
+ppr_splice herald n e
+    = herald <> whenPprDebug (brackets (ppr n)) <> ppr e
 
 
 type instance XExpBr  GhcPs       = NoExtField
