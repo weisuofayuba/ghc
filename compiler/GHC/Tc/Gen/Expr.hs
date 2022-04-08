@@ -746,9 +746,9 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
                                       updEnv = zip upd_fld_names $ map (\(L _ bind) -> hfbRHS bind) rbinds
                                       to_val (fld, var) = lookup (flSelector fld) updEnv `orElse` var
                                       vals = map to_val fieldsVars
-                                      rhs = wrapGenSpan $ genHsApps con vals
+                                      rhs  = wrapGenSpan $ genHsApps con vals
                                       -- todo: change to underscore
-                                      pat = nlConVarPatName con con_field_names
+                                      pat = genSimpleConPat con con_field_names
                                 ; return $ mkSimpleMatch CaseAlt [pat] rhs
                                }
         -- STEP 2

@@ -1,5 +1,6 @@
 module GHC.Tc.Types where
 
+import GHC.Prelude
 import GHC.Tc.Utils.TcType
 import GHC.Types.SrcLoc
 import GHC.Utils.Outputable
@@ -16,3 +17,5 @@ getLclEnvTcLevel :: TcLclEnv -> TcLevel
 
 setLclEnvLoc :: TcLclEnv -> RealSrcSpan -> TcLclEnv
 getLclEnvLoc :: TcLclEnv -> RealSrcSpan
+
+lclEnvInGeneratedCode :: TcLclEnv -> Bool
