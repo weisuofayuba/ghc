@@ -98,8 +98,27 @@ instance Coercible a b => Enum (Coercion a b) where
 deriving instance Coercible a b => Bounded (Coercion a b)
 
 -- | This class contains types where you can learn the equality of two types
--- from information contained in /terms/. Typically, only singleton types should
--- inhabit this class.
+-- from information contained in /terms/.
+--
+-- The result should be @Just Coercion@ if and only if the types applied to @f@
+-- are coercible:
+--
+-- @testCoercion (x :: f a) (y :: f b) = Just Coercion@ ⟺ Coercible a b@
+--
+-- Typically, only singleton types should inhabit this class. In that case, the
+-- restriction of @testEquality@ to its @Just _@ image is injective:
+--
+-- if
+--
+-- @testCoercion (w :: f a) (x :: f b) = Just Coercion@
+-- @testCoercion (y :: f a) (z :: f b) = Just Coercion@
+--
+-- then
+--
+-- @(w, x) = (y, z)@
+--
+-- Singleton types are not required, however, and so the latter would-be
+-- laws are not in fact valid in general.
 class TestCoercion f where
   -- | Conditionally prove the representational equality of @a@ and @b@.
   testCoercion :: f a -> f b -> Maybe (Coercion a b)
