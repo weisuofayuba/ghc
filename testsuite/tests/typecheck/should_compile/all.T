@@ -821,6 +821,7 @@ test('T18406b', normal, compile, ['-ddump-tc -fprint-explicit-foralls -dsuppress
 test('T18529', normal, compile, ['-ddump-tc -fprint-explicit-foralls -dsuppress-uniques -fprint-typechecker-elaboration'])
 test('T21023', normal, compile, ['-ddump-types'])
 test('T2595', normal, compile, [''])
+test('T3632', normal, compile, [''])
 test('T10808', normal, compile, [''])
 test('T10856', normal, compile, [''])
 test('T16501', normal, compile, [''])
