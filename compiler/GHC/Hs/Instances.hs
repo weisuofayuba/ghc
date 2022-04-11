@@ -378,17 +378,11 @@ deriving instance Data (HsUntypedSplice GhcPs)
 deriving instance Data (HsUntypedSplice GhcRn)
 deriving instance Data (HsUntypedSplice GhcTc)
 
-deriving instance Data (HsUntypedSpliceResult GhcPs (HsExpr GhcRn))
-deriving instance Data (HsUntypedSpliceResult GhcRn (HsExpr GhcRn))
-deriving instance Data (HsUntypedSpliceResult GhcTc (HsExpr GhcRn))
+deriving instance Data (HsUntypedSpliceResult (HsExpr GhcRn))
 
-deriving instance Data (HsUntypedSpliceResult GhcPs (Pat GhcRn))
-deriving instance Data (HsUntypedSpliceResult GhcRn (Pat GhcRn))
-deriving instance Data (HsUntypedSpliceResult GhcTc (Pat GhcRn))
+deriving instance Data (HsUntypedSpliceResult (Pat GhcRn))
 
-deriving instance Data (HsUntypedSpliceResult GhcPs (HsType GhcRn))
-deriving instance Data (HsUntypedSpliceResult GhcRn (HsType GhcRn))
-deriving instance Data (HsUntypedSpliceResult GhcTc (HsType GhcRn))
+deriving instance Data (HsUntypedSpliceResult (HsType GhcRn))
 
 -- deriving instance (DataIdLR p p) => Data (HsQuote p)
 deriving instance Data (HsQuote GhcPs)

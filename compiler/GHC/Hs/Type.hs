@@ -302,7 +302,7 @@ type instance XKindSig         (GhcPass _) = EpAnn [AddEpAnn]
 type instance XAppKindTy       (GhcPass _) = SrcSpan -- Where the `@` lives
 
 type instance XSpliceTy        GhcPs = NoExtField
-type instance XSpliceTy        GhcRn = HsUntypedSpliceResult GhcRn (HsType GhcRn)
+type instance XSpliceTy        GhcRn = HsUntypedSpliceResult (HsType GhcRn)
 type instance XSpliceTy        GhcTc = Kind
 
 type instance XDocTy           (GhcPass _) = EpAnn [AddEpAnn]

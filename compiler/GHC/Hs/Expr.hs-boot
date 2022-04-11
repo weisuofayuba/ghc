@@ -41,5 +41,5 @@ pprPatBind :: forall bndr p . (OutputableBndrId bndr,
 pprFunBind :: (OutputableBndrId idR)
            => MatchGroup (GhcPass idR) (LHsExpr (GhcPass idR)) -> SDoc
 
-type role HsUntypedSpliceResult nominal representational
-data HsUntypedSpliceResult p (i' :: Type)
+type role HsUntypedSpliceResult representational
+data HsUntypedSpliceResult (cts :: Type)

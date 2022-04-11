@@ -1791,11 +1791,12 @@ instance Data ThModFinalizers where
 -- See Note [Delaying modFinalizers in untyped splices] in GHC.Rename.Splice.
 -- This is the result of splicing a splice. It is produced by
 -- the renamer and consumed by the typechecker. It lives only between the two.
-data HsUntypedSpliceResult p thing
-  = HsUntypedSpliceTop { utsplice_result_finalizers :: ThModFinalizers -- ^ TH finalizers produced by the splice.
-                       , utsplice_result            :: thing -- ^ The result of splicing; See Note [Lifecycle of a splice]
-                       }
-  | HsUntypedSpliceNested (IdP p) -- A unique name to identify this splice point
+data HsUntypedSpliceResult thing  -- 'thing' can be HsExpr or HsType
+  = HsUntypedSpliceTop
+      { utsplice_result_finalizers :: ThModFinalizers -- ^ TH finalizers produced by the splice.
+      , utsplice_result            :: thing           -- ^ The result of splicing; See Note [Lifecycle of a splice]
+      }
+  | HsUntypedSpliceNested SplicePointName -- A unique name to identify this splice point
 
 -- (IdP id): A unique name to identify this splice point
 type instance XTypedSplice   GhcPs = (EpAnnCO, EpAnn [AddEpAnn])
@@ -1803,17 +1804,15 @@ type instance XTypedSplice   GhcRn = TypedSpliceRn
 type instance XTypedSplice   GhcTc = DelayedSplice
 
 type instance XUntypedSplice GhcPs = EpAnnCO
-type instance XUntypedSplice GhcRn = HsUntypedSpliceResult GhcRn (HsExpr GhcRn)
-type instance XUntypedSplice GhcTc = HsUntypedSpliceResult GhcTc (HsExpr GhcRn)
+type instance XUntypedSplice GhcRn = HsUntypedSpliceResult (HsExpr GhcRn)
+type instance XUntypedSplice GhcTc = HsUntypedSpliceResult (HsExpr GhcRn)
 
 -- HsUntypedSplice
 type instance XUntypedSpliceExpr GhcPs = EpAnn [AddEpAnn]
 type instance XUntypedSpliceExpr GhcRn = EpAnn [AddEpAnn]
 type instance XUntypedSpliceExpr GhcTc = DataConCantHappen
 
-type instance XQuasiQuote        GhcPs = IdP GhcPs -- Quoter
-type instance XQuasiQuote        GhcRn = IdP GhcRn -- Quoter
-type instance XQuasiQuote        GhcTc = DataConCantHappen
+type instance XQuasiQuote        (GhcPass p) = IdGhcP p
 
 type instance XXUntypedSplice    GhcPs = DataConCantHappen
 type instance XXUntypedSplice    GhcRn = DataConCantHappen
@@ -1930,11 +1929,10 @@ pprUntypedSplice :: forall p. (OutputableBndrId p)
                  -> SDoc
 pprUntypedSplice True  (HsUntypedSpliceExpr _ e) = ppr_splice (text "$") undefined e
 pprUntypedSplice False (HsUntypedSpliceExpr _ e) = ppr_splice empty undefined e
-pprUntypedSplice _ (HsQuasiQuote q s)            = ppr_quasi undefined q (unLoc s)
+pprUntypedSplice _ (HsQuasiQuote q s)            = ppr_quasi q (unLoc s)
 
-ppr_quasi :: OutputableBndr p => p -> p -> FastString -> SDoc
-ppr_quasi n quoter quote = whenPprDebug (brackets (ppr n)) <>
-                           char '[' <> ppr quoter <> vbar <>
+ppr_quasi :: OutputableBndr p => p -> FastString -> SDoc
+ppr_quasi quoter quote = char '[' <> ppr quoter <> vbar <>
                            ppr quote <> text "|]"
 
 ppr_splice :: (OutputableBndrId p)

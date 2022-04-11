@@ -137,7 +137,7 @@ type instance XViewPat GhcTc = Type
   -- (= the argument type of the view function), for hsPatType.
 
 type instance XSplicePat GhcPs = NoExtField
-type instance XSplicePat GhcRn = HsUntypedSpliceResult GhcRn (Pat GhcRn) -- See Note [Lifecycle of a splice] in GHC.Hs.Expr
+type instance XSplicePat GhcRn = HsUntypedSpliceResult (Pat GhcRn) -- See Note [Lifecycle of a splice] in GHC.Hs.Expr
 type instance XSplicePat GhcTc = DataConCantHappen
 
 type instance XLitPat    (GhcPass _) = NoExtField
