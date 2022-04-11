@@ -1,7 +1,12 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
--- {-# OPTIONS_GHC -Werror #-}
+{-# OPTIONS_GHC -Werror #-}
+
+{-|
+Module      : GHC.Driver.Backend
+Description : Defines back ends for code generation
+-}
 
 module GHC.Driver.Backend
    ( ncgBackend
@@ -23,7 +28,6 @@ module GHC.Driver.Backend
 
 where
 
--- | What constitutes a back end for code generation
 
 import GHC.Prelude
 
@@ -109,9 +113,6 @@ prototypeBackend =
             , backendSupportsCExport = True
 
             ----------------- supporting tooling
-            -- | The assembler used on the code that is written by this back end.
-            -- A program determined by a combination of back end,
-            -- DynFlags, and Platform is run with the given `Option`s.
             , backendAssemblerProg = StandardAssemblerProg -- \logger dflags _platform -> runAs logger dflags
             , backendAssemblerInfoGetter = StandardAssemblerInfoGetter
                 -- \logger dflags _platform -> getAssemblerInfo logger dflags

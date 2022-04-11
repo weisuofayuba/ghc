@@ -1685,13 +1685,6 @@ enableCodeGenForTH
   -> IO [ModuleGraphNode]
 enableCodeGenForTH logger tmpfs unit_env =
   enableCodeGenWhen logger tmpfs TFL_CurrentModule TFL_GhcSession unit_env
-  where
-    condition = isTemplateHaskellOrQQNonBoot
-    should_modify ms@(ModSummary { ms_hspp_opts = dflags }) =
-      not (backendGeneratesCode $ backend dflags) &&
-      -- Don't enable codegen for TH on indefinite packages; we
-      -- can't compile anything anyway! See #16219.
-      isHomeUnitDefinite (ue_unitHomeUnit (ms_unitid ms) unit_env)
 
 -- | Helper used to implement 'enableCodeGenForTH'.
 -- In particular, this enables

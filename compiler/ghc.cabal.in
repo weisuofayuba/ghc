@@ -379,7 +379,6 @@ Library
         GHC.Data.UnionFind
         GHC.Driver.Backend
         GHC.Driver.Backend.Types
-        GHC.Driver.Backend.Legacy
         GHC.Driver.Backpack
         GHC.Driver.Backpack.Syntax
         GHC.Driver.CmdLine
