@@ -72,7 +72,7 @@ import GHC.Tc.Types.Rank (Rank)
 import GHC.Tc.Utils.TcType (TcType)
 import GHC.Types.Error
 import GHC.Types.FieldLabel (FieldLabelString)
-import GHC.Types.Name (Name, OccName, getSrcLoc)
+import GHC.Types.Name (Name, OccName, getSrcLoc, getSrcSpan)
 import GHC.Types.Name.Reader
 import GHC.Types.SrcLoc
 import GHC.Types.TyThing (TyThing)
@@ -2568,7 +2568,7 @@ pprRelevantBindings :: RelevantBindings -> SDoc
 pprRelevantBindings (RelevantBindings bds ran_out_of_fuel) =
   ppUnless (null bds) $
     hang (text "Relevant bindings include")
-       2 (vcat (map ppr_binding bds) $$ ppWhen ran_out_of_fuel discardMsg)
+       2 (vcat (map ppr_binding (filter (not . isNoSrcSpan . getSrcSpan . fst) bds)) $$ ppWhen ran_out_of_fuel discardMsg)
   where
     ppr_binding (nm, tidy_ty) =
       sep [ pprPrefixOcc nm <+> dcolon <+> ppr tidy_ty

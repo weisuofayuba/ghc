@@ -1,3 +1,4 @@
+
 T21158.hs:12:14: error:
     • Couldn't match type: F b0
                      with: F b
@@ -5,12 +6,9 @@ T21158.hs:12:14: error:
         Actual: [F b0]
       NB: ‘F’ is a non-injective type family
       The type variable ‘b0’ is ambiguous
-    • In the expression:
-        case emptyT of MkT x_ay4 y_ay5 -> MkT newx y_ay5
       In the expression: emptyT {x = newx}
       In an equation for ‘foo1’: foo1 newx = emptyT {x = newx}
     • Relevant bindings include
-        y_ay5 :: [F b0] (bound at <no location info>)
         foo1 :: [Int] -> T b (bound at T21158.hs:12:1)
 
 T21158.hs:15:49: error:
