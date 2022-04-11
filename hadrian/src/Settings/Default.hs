@@ -174,12 +174,10 @@ defaultRtsWays = mconcat
   [ pure [vanilla, threaded]
   , notStage0 ? pure
       [ profiling, threadedProfiling, debugProfiling, threadedDebugProfiling
-      , logging, threadedLogging
       , debug, threadedDebug
       ]
   , notStage0 ? platformSupportsSharedLibs ? pure
-      [ dynamic, threadedDynamic, debugDynamic, loggingDynamic
-      , threadedDebugDynamic, threadedLoggingDynamic
+      [ dynamic, threadedDynamic, debugDynamic, threadedDebugDynamic
       ]
   ]
 

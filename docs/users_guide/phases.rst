@@ -1052,6 +1052,7 @@ for example).
     :shortdesc: Enable runtime event tracing
     :type: dynamic
     :category: linking
+    :since: Unconditionally enabled with 9.4 and later
 
     Link the program with the "eventlog" version of the runtime system.
     A program linked in this way can generate a runtime trace of events
@@ -1059,8 +1060,8 @@ for example).
     which can then be interpreted later by various tools. See
     :ref:`rts-eventlog` for more information.
 
-    :ghc-flag:`-eventlog` can be used with :ghc-flag:`-threaded`. It is implied by
-    :ghc-flag:`-debug`.
+    Note that as of GHC 9.4 and later eventlog support is included in
+    the RTS by default and the :ghc-flag:`-eventlog` is deprecated.
 
 .. ghc-flag:: -rtsopts[=⟨none|some|all|ignore|ignoreAll⟩]
     :shortdesc: Control whether the RTS behaviour can be tweaked via command-line
