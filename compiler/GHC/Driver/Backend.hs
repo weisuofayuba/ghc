@@ -10,7 +10,6 @@ Description : Defines back ends for code generation
 
 module GHC.Driver.Backend
    ( ncgBackend
-   , prototypeBackend
    , llvmBackend
    , viaCBackend
    , interpreterBackend
@@ -23,6 +22,7 @@ module GHC.Driver.Backend
    , backendValidityOfCImport
    , backendValidityOfCExport
 
+   , prototypeBackend
    , allBackends
    )
 
@@ -31,6 +31,7 @@ where
 
 import GHC.Prelude
 
+import GHC.Driver.Backend.Migration (BackendName(..))
 import GHC.Driver.Backend.Types
 import GHC.Driver.Phases
 
@@ -127,6 +128,7 @@ prototypeBackend =
                  -- \ _ _ _ _ -> return Nothing
 
             , backendNormalSuccessorPhase = missing "NormalSuccessorPhase"
+            , backendName = missing "Name"
             }
   where missing fname =
             panic $ "in a back end, field `backend" ++ fname ++ "` was not initialized"
@@ -156,6 +158,7 @@ ncgBackend =
                      , backendCodeOutput = NcgCodeOutput -- outputAsm
                      , backendPostHscPipeline = NcgPostHscPipeline -- asPipeline False
                      , backendNormalSuccessorPhase = As False
+                     , backendName = Just NCG
                      }
 
 
@@ -207,6 +210,7 @@ llvmBackend =
 
                      , backendNormalSuccessorPhase = LlvmOpt
 
+                     , backendName = Just LLVM
                      }
 
 -- | Via-C backend.
@@ -235,6 +239,7 @@ viaCBackend =
                      , backendCodeOutput = ViaCCodeOutput -- outputC
                      , backendPostHscPipeline = ViaCPostHscPipeline -- viaCPipeline HCc
                      , backendNormalSuccessorPhase = HCc
+                     , backendName = Just ViaC
                      }
 
 
@@ -257,6 +262,7 @@ noBackend =
                      , backendSpecialModuleSource = const (Just "nothing")
                      , backendCodeOutput = panic "codeOutput: noBackend"
                      , backendNormalSuccessorPhase = StopLn
+                     , backendName = Just NoBackend
                      }
 
 
@@ -287,6 +293,7 @@ interpreterBackend = -- implements -fno-code
                      , backendSupportsCExport = False
                      , backendCodeOutput = panic "codeOutput: interpreterBackend"
                      , backendNormalSuccessorPhase = StopLn
+                     , backendName = Just Interpreter
                      }
 
 

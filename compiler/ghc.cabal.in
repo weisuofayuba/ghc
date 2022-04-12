@@ -378,6 +378,7 @@ Library
         GHC.Data.TrieMap
         GHC.Data.UnionFind
         GHC.Driver.Backend
+        GHC.Driver.Backend.Migration
         GHC.Driver.Backend.Types
         GHC.Driver.Backpack
         GHC.Driver.Backpack.Syntax

@@ -107,12 +107,15 @@ module GHC.Driver.Backend.Types
    , DefunctionalizedAssemblerInfoGetter(..)
      -- ** Other back-end functions
    , DefunctionalizedCDefs(..)
+     -- * Names of back ends (for legacy API clients)
+   , BackendName
    )
 
 where
 
 import GHC.Prelude
 
+import GHC.Driver.Backend.Migration
 import GHC.Driver.Phases
 import GHC.Driver.Pipeline.Monad
 import GHC.Utils.Error
@@ -498,6 +501,15 @@ data Backend =
             -- value gives instructions like "run the C compiler",
             -- "run the assembler," or "run the LLVM Optimizer."
             , backendNormalSuccessorPhase :: Phase
+
+
+            -- | Name of the back end, if any.  Used to migrate legacy
+            -- clients of the GHC API.  Code within the GHC source
+            -- tree should not refer to this field.
+            --
+            -- Only back ends found in GHC 9.2 have names.  Newer back
+            -- ends will not be named.
+            , backendName :: Maybe BackendName
 
             }
 
