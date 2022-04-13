@@ -414,7 +414,7 @@ data Backend =
             , backendSupportsCImport :: !Bool
 
 
-            -- | This flag says whehther the back end supports foreign
+            -- | This flag says whether the back end supports foreign
             -- export of Haskell functions to C.
             , backendSupportsCExport :: !Bool
 
