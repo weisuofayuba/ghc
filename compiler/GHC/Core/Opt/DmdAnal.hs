@@ -1545,9 +1545,15 @@ We never unbox class dictionaries in worker/wrapper.
    occur without INLINABLE, when we use -fexpose-all-unfoldings and
    -fspecialise-aggressively to do vigorous cross-module specialisation.
 
-TL;DR we /never/ unbox class dictionaries. Unboxing the dictionary, and passing
-a raft of higher-order functions isn't a huge win anyway -- you really want to
-specialise the function.
+TL;DR we /never/ unbox class dictionaries in worker/wrapper; see the
+call to isClassPred in mk_triple in finaliseArgBoxities. Unboxing the
+dictionary, and passing a raft of higher-order functions isn't a huge
+win anyway -- you really want to specialise the function.
+
+However we /do/ unbox let-bound class dictionaries; see finaliseLetBoxities.
+E.g.  let d::Eq a = ... in ...
+We can turn that into a case expression.  There no specialiser to
+worry about here.
 
 Note [Worker argument budget]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1690,6 +1696,9 @@ finaliseLetBoxity
 -- This function is like finaliseArgBoxities, but much simpler because
 -- it has no "budget".  It simply unboxes strict demands, and stops
 -- when it reaches a lazy one.
+--
+-- We do this even for dictionary arguments;
+-- see Note [Do not unbox class dictionaries]
 finaliseLetBoxity env ty dmd
   = go (ty, NotMarkedStrict, dmd)
   where

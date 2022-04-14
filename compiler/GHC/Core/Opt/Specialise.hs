@@ -905,7 +905,8 @@ up with (h (dfun d)), /and/ we don't specialise 'h', then we won't
 pass to 'h' a tuple of specialised functions.
 
 However, the flag -fspecialise-aggressively (experimental, off by default)
-allows DFuns to specialise as well.
+allows DFuns to specialise as well. #8774 has some indication of why we
+might want to do this.
 
 Note [Avoiding loops in specImports]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
