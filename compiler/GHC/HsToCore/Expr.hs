@@ -1,4 +1,5 @@
 
+
 {-# LANGUAGE TypeFamilies #-}
 
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns   #-}
@@ -606,7 +607,7 @@ dsExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left fields
         ; ([discrim_var], matching_code)
                 <- matchWrapper RecUpd (Just [record_expr]) -- See Note [Scrutinee in Record updates]
                                       (MG { mg_alts = noLocA alts
-                                          , mg_ext = MatchGroupTc [unrestricted in_ty] out_ty
+                                          , mg_ext = MatchGroupTc [Anon VisArg (unrestricted in_ty)] out_ty
                                           , mg_origin = FromSource
                                           })
                                      -- FromSource is not strictly right, but we
@@ -990,7 +991,7 @@ dsDo ctx stmts
                            (MG { mg_alts = noLocA [mkSimpleMatch
                                                     LambdaExpr
                                                     [mkVisPat mfix_pat] body]
-                               , mg_ext = MatchGroupTc [unrestricted tup_ty] body_ty
+                               , mg_ext = MatchGroupTc [Anon VisArg (unrestricted tup_ty)] body_ty
                                , mg_origin = Generated })
         mfix_pat     = noLocA $ LazyPat noExtField $ mkBigLHsPatTupId rec_tup_pats
         body         = noLocA $ HsDo body_ty

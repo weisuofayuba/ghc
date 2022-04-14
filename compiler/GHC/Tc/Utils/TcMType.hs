@@ -77,7 +77,7 @@ module GHC.Tc.Utils.TcMType (
   zonkTyCoVarsAndFVList,
 
   zonkTcType, zonkTcTypes, zonkCo,
-  zonkTyCoVarKind,
+  zonkTyCoVarKind, zonkTyCoVarKindBinder,
   zonkEvVar, zonkWC, zonkImplication, zonkSimples,
   zonkId, zonkCoVar,
   zonkCt, zonkSkolemInfo, zonkSkolemInfoAnon,
@@ -101,7 +101,8 @@ module GHC.Tc.Utils.TcMType (
 
   ------------------------------
   -- Other
-  anyUnfilledCoercionHoles
+  anyUnfilledCoercionHoles,
+  toTyCoBinder, checkingExpBinder
   ) where
 
 import GHC.Prelude
@@ -2383,6 +2384,10 @@ zonkTyCoVarKind :: TyCoVar -> TcM TyCoVar
 zonkTyCoVarKind tv = do { kind' <- zonkTcType (tyVarKind tv)
                         ; return (setTyVarKind tv kind') }
 
+zonkTyCoVarKindBinder :: (VarBndr TyCoVar fl) -> TcM (VarBndr TyCoVar fl)
+zonkTyCoVarKindBinder (Bndr tv fl) = do { kind' <- zonkTcType (tyVarKind tv)
+                                        ; return $ Bndr (setTyVarKind tv kind') fl }
+
 {-
 ************************************************************************
 *                                                                      *
@@ -2814,3 +2819,16 @@ instance Semigroup UnfilledCoercionHoleMonoid where
 
 instance Monoid UnfilledCoercionHoleMonoid where
   mempty = UCHM (return False)
+
+toTyCoBinder :: ExpTyCoBinder -> TcM TyCoBinder
+toTyCoBinder (ExpNamed tvb) = return (Named tvb)
+toTyCoBinder (ExpAnon flag scaled_exp_type) =
+  do { unExp <- readScaledExpType scaled_exp_type
+     ; return (Anon flag unExp) }
+
+checkingExpBinder :: String -> ExpTyCoBinder -> TyCoBinder
+checkingExpBinder str (ExpAnon flag (Scaled mult exp_type)) =
+  Anon flag (Scaled mult ty)
+  where
+    ty = checkingExpType str exp_type
+checkingExpBinder _ (ExpNamed tvb) = Named tvb

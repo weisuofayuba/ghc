@@ -36,7 +36,7 @@ module GHC.Hs.Pat (
 
         mkPrefixConPat, mkCharLitPat, mkNilPat, mkVisPat, expectVisPats,
 
-        isSimplePat,
+        isSimplePat, isSimpleMatchPat,
         looksLazyPatBind,
         isBangedLPat,
         gParPat, patNeedsParens, parenthesizePat, parenthesizeLMatchPat,
@@ -226,6 +226,7 @@ data XXPatGhcTc
   -- for RebindableSyntax and other overloaded syntax such as OverloadedLists.
   -- See Note [Rebindable syntax and HsExpansion].
   | ExpansionPat (Pat GhcRn) (Pat GhcTc)
+
 
 -- See Note [Rebindable syntax and HsExpansion].
 data HsPatExpansion a b
@@ -626,6 +627,11 @@ isSimplePat p = case unLoc p of
   VarPat _ x -> Just (unLoc x)
   _ -> Nothing
 
+isSimpleMatchPat :: LMatchPat (GhcPass x) -> Maybe (IdP (GhcPass x))
+isSimpleMatchPat p = case unLoc p of
+  VisPat _ lpat -> isSimplePat lpat
+  InvisTyVarPat _ bndr -> Just (hsLTyVarName bndr)
+  _ -> Nothing
 
 {- Note [Unboxed sum patterns aren't irrefutable]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

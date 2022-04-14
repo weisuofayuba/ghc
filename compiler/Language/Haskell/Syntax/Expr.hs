@@ -1049,8 +1049,8 @@ data MatchGroup p body
 
 data MatchGroupTc
   = MatchGroupTc
-       { mg_arg_tys :: [Scaled Type]  -- Types of the arguments, t1..tn
-       , mg_res_ty  :: Type    -- Type of the result, tr
+       { mg_arg_tys :: [TyCoBinder]  -- Types of the arguments, t1..tn
+       , mg_res_ty  :: Type          -- Type of the result, tr
        } deriving Data
 
 -- | Located Match
