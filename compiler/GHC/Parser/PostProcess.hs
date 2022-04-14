@@ -60,8 +60,6 @@ module GHC.Parser.PostProcess (
         checkPrecP,           -- Int -> P Int
         checkContext,         -- HsType -> P HsContext
         checkPattern,         -- HsExp -> P HsPat
-        checkLMatchPattern,
-        mkInvisPatBuilder,
         checkPattern_details,
         incompleteDoBlock,
         ParseContext(..),
@@ -1302,7 +1300,7 @@ checkPatBind loc annsIn (L _ (BangPat (EpAnn _ ans cs) (L _ (VarPat _ v))))
                                     , mc_fixity = Prefix
                                     , mc_strictness = SrcStrict }
                   , m_pats = []
-                  , m_grhss = grhss }
+                 , m_grhss = grhss }
 
 checkPatBind loc annsIn lhs (L _ grhss) = do
   cs <- getCommentsFor loc

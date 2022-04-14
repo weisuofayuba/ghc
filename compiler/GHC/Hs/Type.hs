@@ -78,7 +78,7 @@ module GHC.Hs.Type (
         mkHsOpTy, mkHsAppTy, mkHsAppTys, mkHsAppKindTy,
         ignoreParens, hsSigWcType, hsPatSigType,
         hsTyKindSig,
-        setHsTyVarBndrFlag, hsTyVarBndrFlag, hsTyVarBndrId,
+        setHsTyVarBndrFlag, hsTyVarBndrFlag, hsTyVarBndrId, hsTyVarBndrTy,
 
         -- Printing
         pprHsType, pprHsForAll,
@@ -98,7 +98,7 @@ import GHC.Hs.Extension
 import GHC.Parser.Annotation
 
 import GHC.Types.Fixity ( LexicalFixity(..) )
-import GHC.Types.Id ( Id )
+import GHC.Types.Id ( Id, idType )
 import GHC.Types.SourceText
 import GHC.Types.Name( Name, NamedThing(getName) )
 import GHC.Types.Name.Reader ( RdrName )
@@ -277,6 +277,10 @@ hsTyVarBndrId :: HsTyVarBndr flag pass -> LIdP pass
 hsTyVarBndrId (UserTyVar _ _ lipd)     = lipd
 hsTyVarBndrId (KindedTyVar _ _ lipd _) = lipd
 hsTyVarBndrId _                        = panic "hsTyVarBndrId: no LIdP"
+
+hsTyVarBndrTy :: HsTyVarBndr flag GhcTc -> Type
+hsTyVarBndrTy (UserTyVar _ _ lipd)     = idType (unLoc lipd)
+hsTyVarBndrTy (KindedTyVar _ _ lipd _) = idType (unLoc lipd)
 
 -- | Set the attached flag
 setHsTyVarBndrFlag :: flag -> HsTyVarBndr flag' (GhcPass pass)

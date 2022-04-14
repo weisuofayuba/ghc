@@ -20,6 +20,7 @@
 -- See Note [Language.Haskell.Syntax.* Hierarchy] for why not GHC.Hs.*
 module Language.Haskell.Syntax.Pat (
         Pat(..), LPat, MatchPat(..), LMatchPat, ConLikeP,
+        isVis, isInvis,
 
         HsConPatDetails, hsConPatArgs,
         HsRecFields(..), HsFieldBind(..), LHsFieldBind,
@@ -221,6 +222,14 @@ data MatchPat pass
 
 type LMatchPat pass = XRec pass (MatchPat pass)
 
+isVis :: forall pass. UnXRec pass => LMatchPat pass -> Bool
+isVis pat =
+  case unXRec @pass pat of
+    VisPat _ _ -> True
+    _          -> False
+
+isInvis :: forall pass. UnXRec pass => LMatchPat pass -> Bool
+isInvis = not . isVis
 -- ---------------------------------------------------------------------
 
 
