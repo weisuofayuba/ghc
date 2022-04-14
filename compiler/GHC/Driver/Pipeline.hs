@@ -580,7 +580,7 @@ compileForeign hsc_env lang stub_c = do
               LangCxx    -> viaCPipeline Ccxx
               LangObjc   -> viaCPipeline Cobjc
               LangObjcxx -> viaCPipeline Cobjcxx
-              LangAsm    -> \pe hsc_env ml fp -> asPipeline True pe hsc_env ml fp
+              LangAsm    -> \pe hsc_env ml fp -> Just <$> asPipeline True pe hsc_env ml fp
 #if __GLASGOW_HASKELL__ < 811
               RawObject  -> panic "compileForeign: should be unreachable"
 #endif
@@ -768,14 +768,14 @@ hscGenBackendPipeline pipe_env hsc_env mod_sum result = do
 
 asPipeline :: P m => Bool -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> m ObjFile
 asPipeline use_cpp pipe_env hsc_env location input_fn = do
-  Just <$> use (T_As use_cpp pipe_env hsc_env location input_fn)
+  use (T_As use_cpp pipe_env hsc_env location input_fn)
 
 viaCPipeline :: P m => Phase -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> m (Maybe FilePath)
 viaCPipeline c_phase pipe_env hsc_env location input_fn = do
   out_fn <- use (T_Cc c_phase pipe_env hsc_env input_fn)
   case stop_phase pipe_env of
     StopC -> return Nothing
-    _ -> asPipeline False pipe_env hsc_env location out_fn
+    _ -> Just <$> asPipeline False pipe_env hsc_env location out_fn
 
 llvmPipeline :: P m => PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> m (Maybe FilePath)
 llvmPipeline pipe_env hsc_env location fp = do
@@ -793,7 +793,7 @@ llvmManglePipeline pipe_env hsc_env location llc_fn = do
     if gopt Opt_NoLlvmMangler (hsc_dflags hsc_env)
       then return llc_fn
       else use (T_LlvmMangle pipe_env hsc_env llc_fn)
-  asPipeline False pipe_env hsc_env location mangled_fn
+  Just <$> asPipeline False pipe_env hsc_env location mangled_fn
 
 cmmCppPipeline :: P m => PipeEnv -> HscEnv -> FilePath -> m FilePath
 cmmCppPipeline pipe_env hsc_env input_fn = do
@@ -837,7 +837,7 @@ pipelineStart pipe_env hsc_env input_fn =
    c :: P m => Phase -> m (Maybe FilePath)
    c phase = viaCPipeline phase pipe_env hsc_env Nothing input_fn
    as :: P m => Bool -> m (Maybe FilePath)
-   as use_cpp = asPipeline use_cpp pipe_env hsc_env Nothing input_fn
+   as use_cpp = Just <$> asPipeline use_cpp pipe_env hsc_env Nothing input_fn
 
    objFromLinkable (_, Just (LM _ _ [DotO lnk])) = Just lnk
    objFromLinkable _ = Nothing
@@ -907,7 +907,8 @@ applyPostHscPipeline
     :: TPipelineClass TPhase m
     => DefunctionalizedPostHscPipeline
     -> PipeEnv -> HscEnv -> Maybe ModLocation -> FilePath -> m (Maybe FilePath)
-applyPostHscPipeline NcgPostHscPipeline = asPipeline False
+applyPostHscPipeline NcgPostHscPipeline =
+    \pe he ml fp -> Just <$> asPipeline False pe he ml fp
 applyPostHscPipeline ViaCPostHscPipeline = viaCPipeline HCc
 applyPostHscPipeline LlvmPostHscPipeline = llvmPipeline
 applyPostHscPipeline NoPostHscPipeline = \_ _ _ _ -> return Nothing

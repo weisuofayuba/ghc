@@ -326,19 +326,11 @@ ld: warning: symbol referencing errors
 -- See Note [Merging object files for GHCi] in GHC.Driver.Pipeline.
 runMergeObjects :: Logger -> TmpFs -> DynFlags -> [Option] -> IO ()
 runMergeObjects logger tmpfs dflags args =
-<<<<<<< HEAD
-  traceToolCommand logger "merge-objects" $ do
+  traceSystoolCommand logger "merge-objects" $ do
     let (p,args0) = fromMaybe err (pgm_lm dflags)
         err = throwGhcException $ UsageError $ unwords
             [ "Attempted to merge object files but the configured linker"
             , "does not support object merging." ]
-||||||| parent of ebc6f56c52 (change `Backend` type and remove direct dependencies)
-  traceToolCommand logger "merge-objects" $ do
-    let (p,args0) = pgm_lm dflags
-=======
-  traceSystoolCommand logger "merge-objects" $ do
-    let (p,args0) = pgm_lm dflags
->>>>>>> ebc6f56c52 (change `Backend` type and remove direct dependencies)
         optl_args = map Option (getOpts dflags opt_lm)
         args2     = args0 ++ args ++ optl_args
     -- N.B. Darwin's ld64 doesn't support response files. Consequently we only
@@ -381,7 +373,7 @@ runRanlib logger dflags args = traceSystoolCommand logger "ranlib" $ do
   runSomethingFiltered logger id "Ranlib" ranlib args Nothing Nothing
 
 runWindres :: Logger -> DynFlags -> [Option] -> IO ()
-runWindres logger dflags args = traceToolCommand logger "windres" $ do
+runWindres logger dflags args = traceSystoolCommand logger "windres" $ do
   let cc_args = map Option (sOpt_c (settings dflags))
       windres = pgm_windres dflags
       opts = map Option (getOpts dflags opt_windres)

@@ -39,7 +39,7 @@ import GHC.Core.Predicate
 import GHC.Core.Type
 
 import GHC.Driver.Flags
-import GHC.Driver.Backend.Types
+import GHC.Driver.Backend
 import GHC.Hs
 
 import GHC.Tc.Errors.Types

@@ -85,7 +85,7 @@ GHC.Data.Strict
 GHC.Data.StringBuffer
 GHC.Data.TrieMap
 GHC.Driver.Backend
-GHC.Driver.Backend.Types
+GHC.Driver.Backend.Migration
 GHC.Driver.Backpack.Syntax
 GHC.Driver.CmdLine
 GHC.Driver.Config.Diagnostic

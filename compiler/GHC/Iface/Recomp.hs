@@ -20,7 +20,7 @@ where
 
 import GHC.Prelude
 
-import GHC.Driver.Backend.Types
+import GHC.Driver.Backend
 import GHC.Driver.Config.Finder
 import GHC.Driver.Env
 import GHC.Driver.Session

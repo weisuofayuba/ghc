@@ -1585,10 +1585,10 @@ field of ``DynFlags``.
 Referring to back ends
 ----------------------
 
-In versions of GHC numbered up to and including 9.2, a back end is
+In versions of GHC numbered up to and including 9.4, a back end is
 referred to by name: type ``Backend``, from module
 ``GHC.Driver.Backend``, is a simple enumeration type. In versions of GHC
-numbered 9.4 and higher, ``Backend`` is a record type. The record
+numbered 9.6 and higher, ``Backend`` is a record type. The record
 specifies predicates and functions associated with a back end.
 
 This change in representation requires changes in client code.
@@ -1600,7 +1600,7 @@ Suppose your client uses ``Backend`` only to mention back ends by name.
 That is, it never discriminates between back ends in a ``case``
 expression, function definition, or equality comparison. Then the
 simplest way for you to migrate your code is to replace each value
-constructor from version 9.2 with the corresponding value from 9.4:
+constructor from version 9.4 with the corresponding value from 9.6:
 
 +-----------------+------------------------+
 | Old value       | New value              |
@@ -1638,7 +1638,7 @@ decision-making code depends on the code’s form.
    implementation of the predicate inspects the form of ``Backend``, you
    may still be in luck. For example, if your client needs to know
    whether the ``Backend`` wishes to write files to disk, it can query
-   ``backendWritesFiles backend``. In version 9.2, this predicate holds
+   ``backendWritesFiles backend``. In version 9.4, this predicate holds
    for the NCG, LLVM, and Via-C back ends, but not for the interpreter
    or for ``NoBackend``.
 
@@ -1649,7 +1649,7 @@ decision-making code depends on the code’s form.
 General migration strategy for client code
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-From version 9.4 onward, each of the five legacy back ends may be
+From version 9.6 onward, each of the five legacy back ends may be
 queried for its name:
 
 ::
@@ -1679,7 +1679,7 @@ ends, you can even apply ``fromJust`` to the result. For example,
 
 ::
 
-   case backend dflags of  -- code using the 9.2 interface
+   case backend dflags of  -- code using the 9.4 interface
      NCG -> ...
      LLVM -> ... 
      ...
@@ -1688,7 +1688,7 @@ can become
 
 ::
 
-   case fromJust $ backendName $ backend dflags of  -- code using the 9.4 interface
+   case fromJust $ backendName $ backend dflags of  -- code using the 9.6 interface
      NCG -> ...
      LLVM -> ... 
      ...
