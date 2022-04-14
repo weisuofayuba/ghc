@@ -886,7 +886,7 @@ addArgCtxt :: AppCtxt -> LHsExpr GhcRn
 --      "In the third argument of f, namely blah"
 -- * If we are deep inside generated code (isGeneratedCode)
 --   or if all or part of this particular application is an expansion
---   (VAExpansion), just use the less-informative contexta
+--   (VAExpansion), just use the less-informative context
 --       "In the expression: arg"
 --   Unless the arg is also a generated thing, in which case do nothing.
 ---See Note [Rebindable syntax and HsExpansion] in GHC.Hs.Expr

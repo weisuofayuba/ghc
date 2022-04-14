@@ -8,9 +8,9 @@ data A = A deriving Show
 
 p1 = Just True
 
--- Record updates is desugared to case belowexpression, see #18802.
+-- The record updates in 'p6' is desugared to the following, as per #18802:
 -- p6 = case p1 of ReqNoProv x -> ReqNoProv A
--- (Detials can be found in Note [Record Updates] defined in Tc.Gen.Expr.hs)
+-- (Details of this desugaring can be found in Note [Record Updates] in Tc.Gen.Expr)
 
 p6 = p1 {j = A}
 

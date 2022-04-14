@@ -483,7 +483,7 @@ dsExpr (RecordCon { rcon_con  = L _ con_like
        ; return (mkCoreApps con_expr' con_args) }
 
 dsExpr (RecordUpd {}) =
-  panic "The impossible happened. RecordUpd has been desugared in Tc.Gen.Expr."
+  panic "dsExpr RecordUpd: record updates get desugared in Tc.Gen.Expr.tcExpr"
 
 -- Here is where we desugar the Template Haskell brackets and escapes
 

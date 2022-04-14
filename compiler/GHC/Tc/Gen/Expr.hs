@@ -662,6 +662,35 @@ Then the record update `e { x=e1, y=e2 }` desugars as follosw
 T2, T3 and T5 should not occur, so we omit them from the match.
 The critical part of desugaring is to identify T and then T1/T4.
 
+Wrinkle [Disambiguating fields]
+As outlined above, to typecheck a record update via desugaring, we first need
+to identify the parent record `TyCon` (`T` above). This can be tricky when several
+record types share the same field (with `-XDuplicateRecordFields`).
+
+Currently, we use the inferred type of the record to help disambiguate the record
+fields. For example, in
+
+  ( mempty :: T a b ) { x = 3 }
+
+the type signature on `mempty` allows us to disambiguate the record `TyCon` to `T`,
+when there might be other datatypes with field `x :: Int`.
+This complexity is scheduled for removal via the implementation of GHC proposal #366
+https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0366-no-ambiguous-field-access.rst
+
+However, for the time being, we still need to disambiguate record fields using the
+inferred types. This means that, when typechecking a record update via desugaring,
+we need to do the following:
+
+  D1. Perform a first typechecking pass on the record expression (`e` in the example above),
+      to infer the type of the record being updated.
+  D2. Desugar the record update as described above, using an HsExpansion.
+  D3. Typecheck the desugared code.
+
+In (D1), we call inferRho to infer the type of the record being updated. This returns the
+inferred type of the record, together with a typechecked expression (of type HsExpr GhcTc)
+and a collection of residual constraints.
+We have no need for the latter two, because we will typecheck again in (D3). So, for
+the time being (and until GHC proposal #366 is implemented), we simply drop them.
 -}
 
 -- Record updates via dot syntax are replaced by desugared expressions
@@ -671,9 +700,10 @@ The critical part of desugaring is to identify T and then T1/T4.
 tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_ty
   = assert (notNull rbnds) $
     do  { -- STEP -2: typecheck the record_expr, the record to be updated
-          -- This step is a to feed `disambiguateRecordBinds`. However no context
-          -- is given to `tcInferRho` for the moment, which will cause trouble.
-          -- A temporary hack is adopted before GHC proposal #336 is implemented.
+          -- Until GHC proposal #366 is implemented, we still use the type of
+          -- the record to disambiguate its fields, so we must infer the record
+          -- type here before we can desugar. See Wrinkle [Disambiguating fields]
+          -- in Note [Record Updates].
           ((_, record_rho), _lie) <- captureConstraints $
                                      tcScalingUsage Many $
                                      tcInferRho record_expr
