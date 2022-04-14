@@ -37,6 +37,7 @@ import GHC.Tc.Utils.Monad
 import GHC.Tc.Utils.Unify
 import GHC.Types.Basic
 import GHC.Types.Error
+import GHC.Types.Unique.Map ( UniqMap, listToUniqMap, lookupUniqMap )
 import GHC.Core.Multiplicity
 import GHC.Core.UsageEnv
 import GHC.Tc.Errors.Types
@@ -764,26 +765,51 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
                 -- A constructor is only relevant to this process if
                 -- it contains *all* the fields that are being updated
                 -- Other ones will cause a runtime error if they occur
+
               make_pat :: ConLike -> TcM (LMatch GhcRn (LHsExpr GhcRn))
-              make_pat conLike = do {
-                                ; let con_fields = conLikeFieldLabels conLike
-                                      con = conLikeName conLike
-                                      con_fld_names = map flSelector con_fields
-                                      con_fld_occ_names = map occName con_fld_names
-                                ; con_field_names <- mapM newSysName con_fld_occ_names
-                                ; let con_fld_vars = map genLHsVar con_field_names
-                                      fieldsVars = zip con_fields con_fld_vars
-                                      updEnv = zip upd_fld_names $ map (\(L _ bind) -> hfbRHS bind) rbinds
-                                      to_val (fld, var) = lookup (flSelector fld) updEnv `orElse` var
-                                      vals = map to_val fieldsVars
-                                      rhs  = wrapGenSpan $ genHsApps con vals
-                                      -- The following generates the pattern matches of the desugared `case` expression.
-                                      -- For fields being updated (for example `x`, `y` in T1 and T4 in Note [Record Updates]),
-                                      -- Wildcards are used to avoid creating unused variables.
-                                      maybe_con_field_names = map (\x -> if x `elem` upd_fld_names then Nothing else Just x) con_field_names
-                                      pat = genSimpleConPat con maybe_con_field_names
-                                ; return $ mkSimpleMatch CaseAlt [pat] rhs
-                               }
+              -- As explained in Note [Record Updates], to desugar
+              --
+              --   e { x=e1, y=e2 }
+              --
+              -- we generate a case statement, with an equation for
+              -- each constructor of the record. For example, for
+              -- the constructor
+              --
+              --   T1 :: { x :: Int, y :: Bool, z :: Char } -> T p q
+              --
+              -- we generate the equation:
+              --
+              --   T1 _ _ z -> T1 e1 e2 z
+              make_pat conLike =
+                do { let con_fields = conLikeFieldLabels conLike
+                         con = conLikeName conLike
+
+                   ; (lhs_con_pats, rhs_con_args) <-
+                       mapAndUnzipM (mk_con_arg . flSelector) con_fields
+
+                   ; let rhs = wrapGenSpan $ genHsApps con rhs_con_args
+                         pat = genSimpleConPat con lhs_con_pats
+                   ; return $ mkSimpleMatch CaseAlt [pat] rhs }
+
+              mk_con_arg :: Name
+                         -> TcM ( LPat GhcRn
+                                  -- LHS constructor pattern argument
+                                , LHsExpr GhcRn )
+                                  -- RHS constructor argument
+              mk_con_arg fld_nm =
+                -- The following generates the pattern matches of the desugared `case` expression.
+                -- For fields being updated (for example `x`, `y` in T1 and T4 in Note [Record Updates]),
+                -- wildcards are used to avoid creating unused variables.
+                case lookupUniqMap updEnv fld_nm of
+                  Just rhs -> return (genWildPat, rhs)
+                  Nothing  -> do { fld_nm <- newSysName (occName fld_nm)
+                                 ; return (genVarPat fld_nm, genLHsVar fld_nm) }
+
+              updEnv :: UniqMap Name (LHsExpr GhcRn)
+              updEnv = listToUniqMap
+                     $ zip upd_fld_names
+                     $ map (\(L _ bind) -> hfbRHS bind) rbinds
+
         -- STEP 2
         -- Check that at least one constructor has all the named fields
         -- i.e. has an empty set of bad fields returned by badFields

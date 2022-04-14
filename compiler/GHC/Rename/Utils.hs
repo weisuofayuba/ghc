@@ -21,6 +21,7 @@ module GHC.Rename.Utils (
         badQualBndrErr, typeAppErr, badFieldConErr,
         wrapGenSpan, genHsVar, genLHsVar, genHsApp, genHsApps, genAppType,
         genHsIntegralLit, genHsTyLit, genSimpleConPat,
+        genVarPat, genWildPat,
 
         newLocalBndrRn, newLocalBndrsRn,
 
@@ -677,16 +678,12 @@ genHsIntegralLit lit = wrapGenSpan $ HsLit noAnn (HsInt noExtField lit)
 genHsTyLit :: FastString -> HsType GhcRn
 genHsTyLit = HsTyLit noExtField . HsStrTy NoSourceText
 
-genSimpleConPat :: Name -> [Maybe Name] -> LPat GhcRn
--- The pattern (C v1 .. vn), using wildcard patterns
--- for the 'Nothing' case.
-genSimpleConPat con vars
+genSimpleConPat :: Name -> [LPat GhcRn] -> LPat GhcRn
+-- The pattern (C p1 .. pn)
+genSimpleConPat con pats
   = wrapGenSpan $ ConPat { pat_con_ext = noExtField
                          , pat_con     = wrapGenSpan con
-                         , pat_args    = PrefixCon [] $ map mk_pat vars }
-  where
-    mk_pat Nothing   = genWildPat
-    mk_pat (Just nm) = genVarPat nm
+                         , pat_args    = PrefixCon [] pats }
 
 genVarPat :: Name -> LPat GhcRn
 genVarPat n = wrapGenSpan $ VarPat noExtField (wrapGenSpan n)
