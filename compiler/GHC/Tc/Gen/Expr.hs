@@ -777,8 +777,11 @@ tcExpr expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = Left rbnds }) res_
                                       to_val (fld, var) = lookup (flSelector fld) updEnv `orElse` var
                                       vals = map to_val fieldsVars
                                       rhs  = wrapGenSpan $ genHsApps con vals
-                                      -- todo: change to underscore
-                                      pat = genSimpleConPat con con_field_names
+                                      -- The following generates the pattern matches of the desugared `case` expression.
+                                      -- For fields being updated (for example `x`, `y` in T1 and T4 in Note [Record Updates]),
+                                      -- Wildcards are used to avoid creating unused variables.
+                                      maybe_con_field_names = map (\x -> if x `elem` upd_fld_names then Nothing else Just x) con_field_names
+                                      pat = genSimpleConPat con maybe_con_field_names
                                 ; return $ mkSimpleMatch CaseAlt [pat] rhs
                                }
         -- STEP 2
