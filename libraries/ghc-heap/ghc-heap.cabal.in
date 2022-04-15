@@ -29,6 +29,7 @@ library
 
   ghc-options:      -Wall
   cmm-sources:      cbits/HeapPrim.cmm
+  c-sources:        cbits/Stack.c
 
   default-extensions: NoImplicitPrelude
 
@@ -36,6 +37,7 @@ library
                     GHC.Exts.Heap.Closures
                     GHC.Exts.Heap.ClosureTypes
                     GHC.Exts.Heap.Constants
+                    GHC.Exts.DecodeStack
                     GHC.Exts.Heap.InfoTable
                     GHC.Exts.Heap.InfoTable.Types
                     GHC.Exts.Heap.InfoTableProf

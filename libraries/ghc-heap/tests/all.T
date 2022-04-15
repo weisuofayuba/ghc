@@ -51,3 +51,7 @@ test('parse_tso_flags',
       ignore_stderr
      ],
      compile_and_run, [''])
+
+test('decode_cloned_stack',
+     [only_ways(['normal'])],
+     compile_and_run, ['-debug -optc-g -g'])
