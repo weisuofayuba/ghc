@@ -4,7 +4,6 @@ tcfail102.hs:1:14: warning: [-Wdeprecated-flags (in -Wdefault)]
 
 tcfail102.hs:9:7: error:
     • Could not deduce (Integral (Ratio a))
-        arising from a record update
       from the context: Integral a
         bound by the type signature for:
                    f :: forall a. Integral a => P (Ratio a) -> P (Ratio a)
