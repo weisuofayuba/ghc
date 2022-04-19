@@ -1403,7 +1403,7 @@ repTy (HsKindSig _ t k)     = do
                                 k1 <- repLTy k
                                 repTSig t1 k1
 repTy (HsSpliceTy (HsUntypedSpliceNested n) _) = rep_splice n
-repTy (HsSpliceTy (HsUntypedSpliceTop _ _) _) = undefined -- ROMES:TODO:
+repTy t@(HsSpliceTy (HsUntypedSpliceTop _ _) _) = pprPanic "repTy: top level splice" (ppr t)
 repTy (HsExplicitListTy _ _ tys) = do
                                     tys1 <- repLTys tys
                                     repTPromotedList tys1
@@ -1619,9 +1619,9 @@ repE (ArithSeq _ _ aseq) =
                              ds3 <- repLE e3
                              repFromThenTo ds1 ds2 ds3
 
-repE (HsTypedSplice n _) = rep_splice n -- ROMES:TODO: Is this true for both nested and top level splices?
+repE (HsTypedSplice n _) = rep_splice n
 repE (HsUntypedSplice (HsUntypedSpliceNested n) _)  = rep_splice n
-repE (HsUntypedSplice (HsUntypedSpliceTop _ _) _) = undefined -- ROMES:TODO
+repE e@(HsUntypedSplice (HsUntypedSpliceTop _ _) _) = pprPanic "repE: top level splice" (ppr e)
 repE (HsStatic _ e)        = repLE e >>= rep2 staticEName . (:[]) . unC
 repE (HsUnboundVar _ uv)   = do
                                occ   <- occNameLit uv
@@ -2089,7 +2089,7 @@ repP (SigPat _ p t) = do { p' <- repLP p
                          ; t' <- repLTy (hsPatSigType t)
                          ; repPsig p' t' }
 repP (SplicePat (HsUntypedSpliceNested n) _) = rep_splice n
-repP (SplicePat (HsUntypedSpliceTop _ _) _) = undefined -- ROMES:TODO
+repP p@(SplicePat (HsUntypedSpliceTop _ _) _) = pprPanic "repP: top level splice" (ppr p)
 repP other = notHandled (ThExoticPattern other)
 
 ----------------------------------------------------------
