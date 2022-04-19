@@ -7,7 +7,7 @@ import GHC.Types.Name.Set
 
 
 rnSpliceType :: HsUntypedSplice GhcPs -> RnM (HsType GhcRn, FreeVars)
-rnSplicePat  :: HsUntypedSplice GhcPs -> RnM (Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult a (Pat GhcPs))
+rnSplicePat  :: HsUntypedSplice GhcPs -> RnM (Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult (Pat GhcPs))
                                                      (Pat GhcRn)
                                             , FreeVars)
 rnSpliceDecl :: SpliceDecl GhcPs -> RnM (SpliceDecl GhcRn, FreeVars)

@@ -27,7 +27,7 @@ module GHC.Tc.Gen.Expr
 
 import GHC.Prelude
 
-import {-# SOURCE #-}   GHC.Tc.Gen.Splice( tcSpliceExpr, tcTypedBracket, tcUntypedBracket )
+import {-# SOURCE #-}   GHC.Tc.Gen.Splice( tcTypedSplice, tcTypedBracket, tcUntypedBracket )
 
 import GHC.Hs
 import GHC.Hs.Syn.Type
@@ -859,7 +859,7 @@ tcExpr (HsUntypedSplice (HsUntypedSpliceTop mod_finalizers expr) _)
   = do addModFinalizersWithLclEnv mod_finalizers
        tcExpr expr res_ty
 tcExpr (HsUntypedSplice (HsUntypedSpliceNested _) _) _ = undefined -- ROMES:TODO:
-tcExpr (HsTypedSplice ext splice) res_ty = tcSpliceExpr ext splice res_ty
+tcExpr (HsTypedSplice ext splice) res_ty = tcTypedSplice ext splice res_ty
 tcExpr e@(HsTypedBracket _ body) res_ty = tcTypedBracket e body res_ty
 tcExpr e@(HsUntypedBracket ps body) res_ty = tcUntypedBracket e body ps res_ty
 

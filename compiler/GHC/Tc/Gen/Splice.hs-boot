@@ -14,10 +14,10 @@ import GHC.Hs     ( HsQuote, HsExpr, LHsExpr, LHsType, LPat, LHsDecl,
                     ThModFinalizers, TypedSpliceRn )
 import qualified Language.Haskell.TH as TH
 
-tcSpliceExpr :: TypedSpliceRn
-             -> LHsExpr GhcRn
-             -> ExpRhoType
-             -> TcM (HsExpr GhcTc)
+tcTypedSplice :: TypedSpliceRn
+              -> LHsExpr GhcRn
+              -> ExpRhoType
+              -> TcM (HsExpr GhcTc)
 
 tcTypedBracket :: HsExpr GhcRn
                -> LHsExpr GhcRn

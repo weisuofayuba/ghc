@@ -340,7 +340,7 @@ rnExpr (HsProjection _ fs)
 rnExpr e@(HsTypedBracket _ br_body)   = rnTypedBracket e br_body
 rnExpr e@(HsUntypedBracket _ br_body) = rnUntypedBracket e br_body
 
-rnExpr (HsTypedSplice ext splice) = rnTypedSpliceExpr ext splice
+rnExpr (HsTypedSplice   _ splice) = rnTypedSpliceExpr splice
 rnExpr (HsUntypedSplice _ splice) = rnUntypedSpliceExpr splice
 
 ---------------------------------------------

@@ -294,7 +294,7 @@ rnUntypedSpliceGen run_splice pend_splice splice
   = addErrCtxt (spliceCtxt splice) $ do
     { stage <- getStage
     ; case stage of
-        Brack pop_stage RnPendingTyped
+        Brack _ RnPendingTyped
           -> failWithTc illegalUntypedSplice
 
         Brack pop_stage (RnPendingUntyped ps_var)
@@ -439,17 +439,16 @@ rnUntypedSplice (HsQuasiQuote quoter quote)
         ; return (HsQuasiQuote quoter' quote, unitFV quoter') }
 
 ---------------------
-rnTypedSpliceExpr :: XTypedSplice GhcPs
-                  -> LHsExpr GhcPs      -- Typed splice expression
+rnTypedSpliceExpr :: LHsExpr GhcPs -- Typed splice expression
                   -> RnM (HsExpr GhcRn, FreeVars)
-rnTypedSpliceExpr (annCo, annL) expr
+rnTypedSpliceExpr expr
   = addErrCtxt (hang (text "In the typed splice:") 2 ({- ROMES:TODO: Correct typed ppr with $$ -} ppr expr)) $ do
     { stage <- getStage
     ; case stage of
         Brack pop_stage RnPendingTyped
           -> setStage pop_stage rnTypedNestedSplice
 
-        Brack _ (RnPendingUntyped ps_var)
+        Brack _ (RnPendingUntyped _)
           -> failWithTc illegalTypedSplice
 
         _ -> do { extEnabled <- xoptM LangExt.TemplateHaskell
@@ -727,7 +726,7 @@ whole signature, instead of as an arbitrary type.
 
 ----------------------
 -- | Rename a splice pattern. See Note [rnSplicePat]
-rnSplicePat :: HsUntypedSplice GhcPs -> RnM ( Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult a (Pat GhcPs))
+rnSplicePat :: HsUntypedSplice GhcPs -> RnM ( Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult (Pat GhcPs))
                                                      (Pat GhcRn)
                                             , FreeVars)
 rnSplicePat splice
