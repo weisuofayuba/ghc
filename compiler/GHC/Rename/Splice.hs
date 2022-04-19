@@ -446,7 +446,7 @@ rnTypedSpliceExpr expr
     { stage <- getStage
     ; case stage of
         Brack pop_stage RnPendingTyped
-          -> setStage pop_stage rnTypedNestedSplice
+          -> setStage pop_stage rnTypedSplice
 
         Brack _ (RnPendingUntyped _)
           -> failWithTc illegalTypedSplice
@@ -457,7 +457,7 @@ rnTypedSpliceExpr expr
                        text "Top-level splices are not permitted without"
                          <+> ppr LangExt.TemplateHaskell)
 
-                ; (result, fvs1) <- checkNoErrs $ setStage (Splice Typed) rnTypedTopSplice
+                ; (result, fvs1) <- checkNoErrs $ setStage (Splice Typed) rnTypedSplice
                   -- checkNoErrs: don't attempt to run the splice if
                   -- renaming it failed; otherwise we get a cascade of
                   -- errors from e.g. unbound variables
@@ -474,17 +474,13 @@ rnTypedSpliceExpr expr
 
                 ; return (result, fvs1 `plusFV` fvs2) } }
   where
-    rnTypedNestedSplice :: RnM (HsExpr GhcRn, FreeVars)
-    rnTypedNestedSplice =
+    rnTypedSplice :: RnM (HsExpr GhcRn, FreeVars)
+    rnTypedSplice =
       do { loc <- getSrcSpanM
+         -- The renamer allocates a splice-point name to every typed splice (incl the top level ones for which it will not ultimately be used)
          ; n' <- newLocalBndrRn (L (noAnnSrcSpan loc) unqualSplice)
          ; (expr', fvs) <- rnLExpr expr
-         ; return (HsTypedSplice (NestedTypedSplice n') expr', fvs) }
-
-    rnTypedTopSplice :: RnM (HsExpr GhcRn, FreeVars)
-    rnTypedTopSplice =
-      do { (expr', fvs) <- rnLExpr expr
-         ; return (HsTypedSplice TopLevelTypedSplice expr', fvs) }
+         ; return (HsTypedSplice n' expr', fvs) }
 
 rnUntypedSpliceExpr :: HsUntypedSplice GhcPs -> RnM (HsExpr GhcRn, FreeVars)
 rnUntypedSpliceExpr splice

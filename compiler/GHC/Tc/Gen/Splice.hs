@@ -171,7 +171,7 @@ import GHC.Rename.Doc (rnHsDoc)
 tcTypedBracket    :: HsExpr GhcRn -> LHsExpr GhcRn -> ExpRhoType -> TcM (HsExpr GhcTc)
 tcUntypedBracket  :: HsExpr GhcRn -> HsQuote GhcRn -> [PendingRnSplice] -> ExpRhoType
                   -> TcM (HsExpr GhcTc)
-tcTypedSplice :: TypedSpliceRn -> LHsExpr GhcRn -> ExpRhoType -> TcM (HsExpr GhcTc)
+tcTypedSplice :: Name -> LHsExpr GhcRn -> ExpRhoType -> TcM (HsExpr GhcTc)
         -- None of these functions add constraints to the LIE
 
 -- runQuasiQuoteExpr :: HsQuasiQuote RdrName -> RnM (LHsExpr RdrName)
@@ -604,7 +604,7 @@ That effort is tracked in #14838.
 ************************************************************************
 -}
 
-tcTypedSplice (NestedTypedSplice splice_name) expr res_ty
+tcTypedSplice splice_name expr res_ty
   = addErrCtxt (typedSpliceCtxtDoc splice_name expr) $
     setSrcSpan (getLocA expr)    $ do
     { stage <- getStage
@@ -617,7 +617,6 @@ tcTypedSplice (NestedTypedSplice splice_name) expr res_ty
                       "running another splice") (pprTypedSplice splice_name expr)
           Comp                 -> tcTopSplice expr res_ty
     }
-tcTypedSplice TopLevelTypedSplice _ _ = undefined -- ROMES:TODO:
 
 {- Note [Collecting modFinalizers in typed splices]
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

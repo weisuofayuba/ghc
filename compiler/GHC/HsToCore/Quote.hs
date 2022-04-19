@@ -1619,8 +1619,7 @@ repE (ArithSeq _ _ aseq) =
                              ds3 <- repLE e3
                              repFromThenTo ds1 ds2 ds3
 
-repE (HsTypedSplice (NestedTypedSplice n) _) = rep_splice n
-repE (HsTypedSplice TopLevelTypedSplice _) = undefined -- ROMES:TODO
+repE (HsTypedSplice n _) = rep_splice n -- ROMES:TODO: Is this true for both nested and top level splices?
 repE (HsUntypedSplice (HsUntypedSpliceNested n) _)  = rep_splice n
 repE (HsUntypedSplice (HsUntypedSpliceTop _ _) _) = undefined -- ROMES:TODO
 repE (HsStatic _ e)        = repLE e >>= rep2 staticEName . (:[]) . unC

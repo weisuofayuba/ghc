@@ -33,7 +33,7 @@ import Language.Haskell.Syntax.Expr
 -- friends:
 import GHC.Prelude
 
-import GHC.Hs.Decls
+import GHC.Hs.Decls() -- import instances
 import GHC.Hs.Pat
 import GHC.Hs.Lit
 import Language.Haskell.Syntax.Extension
@@ -44,7 +44,6 @@ import GHC.Parser.Annotation
 
 -- others:
 import GHC.Tc.Types.Evidence
-import GHC.Core.DataCon (FieldLabelString)
 import GHC.Types.Name
 import GHC.Types.Name.Set
 import GHC.Types.Basic
@@ -1800,7 +1799,7 @@ data HsUntypedSpliceResult thing  -- 'thing' can be HsExpr or HsType
 
 -- (IdP id): A unique name to identify this splice point
 type instance XTypedSplice   GhcPs = (EpAnnCO, EpAnn [AddEpAnn])
-type instance XTypedSplice   GhcRn = TypedSpliceRn
+type instance XTypedSplice   GhcRn = Name -- The splice point name
 type instance XTypedSplice   GhcTc = DelayedSplice
 
 type instance XUntypedSplice GhcPs = EpAnnCO
@@ -1817,10 +1816,6 @@ type instance XQuasiQuote        (GhcPass p) = IdGhcP p
 type instance XXUntypedSplice    GhcPs = DataConCantHappen
 type instance XXUntypedSplice    GhcRn = DataConCantHappen
 type instance XXUntypedSplice    GhcTc = NoExtField
-
-data TypedSpliceRn = TopLevelTypedSplice
-                   | NestedTypedSplice Name -- The splice point name
-                   deriving Data
 
 -- See Note [Running typed splices in the zonker]
 -- These are the arguments that are passed to `GHC.Tc.Gen.Splice.runTopSplice`
