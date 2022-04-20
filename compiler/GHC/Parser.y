@@ -2964,19 +2964,19 @@ projection
         | PREFIX_PROJ field  {% acs (\cs -> sLL $1 $> ((sLLa $1 $> $ DotFieldOcc (EpAnn (glR $1) (AnnFieldLabel (Just $ glAA $1)) cs) (reLocA $2)) :| [])) }
 
 splice_exp :: { LHsExpr GhcPs }
-        : splice_typed   { mapLoc (uncurry HsTypedSplice) (reLocA $1) }
-        | splice_untyped { mapLoc (HsUntypedSplice noAnn) (reLocA $1) }
+        : splice_untyped { mapLoc (HsUntypedSplice noAnn) (reLocA $1) }
+        | splice_typed   { mapLoc (uncurry HsTypedSplice) (reLocA $1) }
+
+splice_untyped :: { Located (HsUntypedSplice GhcPs) }
+        -- See Note [Whitespace-sensitive operator parsing] in GHC.Parser.Lexer
+        : PREFIX_DOLLAR aexp2   {% runPV (unECP $2) >>= \ $2 ->
+                                   acs (\cs -> sLLlA $1 $> $ HsUntypedSpliceExpr (EpAnn (glR $1) [mj AnnDollar $1] cs) $2) }
 
 splice_typed :: { Located ((EpAnnCO, EpAnn [AddEpAnn]), LHsExpr GhcPs) }
         -- See Note [Whitespace-sensitive operator parsing] in GHC.Parser.Lexer
         : PREFIX_DOLLAR_DOLLAR aexp2
                                 {% runPV (unECP $2) >>= \ $2 ->
                                    acs (\cs -> sLLlA $1 $> $ ((noComments, EpAnn (glR $1) [mj AnnDollarDollar $1] cs), $2)) }
-
-splice_untyped :: { Located (HsUntypedSplice GhcPs) }
-        -- See Note [Whitespace-sensitive operator parsing] in GHC.Parser.Lexer
-        : PREFIX_DOLLAR aexp2   {% runPV (unECP $2) >>= \ $2 ->
-                                   acs (\cs -> sLLlA $1 $> $ HsUntypedSpliceExpr (EpAnn (glR $1) [mj AnnDollar $1] cs) $2) }
 
 cmdargs :: { [LHsCmdTop GhcPs] }
         : cmdargs acmd                  { $2 : $1 }
