@@ -724,23 +724,22 @@ whole signature, instead of as an arbitrary type.
 
 ----------------------
 -- | Rename a splice pattern. See Note [rnSplicePat]
-rnSplicePat :: HsUntypedSplice GhcPs -> RnM ( Either (HsUntypedSplice GhcRn, HsUntypedSpliceResult (Pat GhcPs))
-                                                     (Pat GhcRn)
+rnSplicePat :: HsUntypedSplice GhcPs -> RnM ( (HsUntypedSplice GhcRn, HsUntypedSpliceResult (Pat GhcPs))
                                             , FreeVars)
 rnSplicePat splice
   = rnUntypedSpliceGen run_pat_splice pend_pat_splice splice
   where
     pend_pat_splice name rn_splice
       = (makePending UntypedPatSplice name rn_splice
-        , Right (SplicePat (HsUntypedSpliceNested name) rn_splice)) -- Pat splice is nested and thus simply renamed
+        , (rn_splice, HsUntypedSpliceNested name)) -- Pat splice is nested and thus simply renamed
 
-    run_pat_splice rn_splice -- ROMES:TODO: explain in note..
+    run_pat_splice rn_splice
       = do { traceRn "rnSplicePat: untyped pattern splice" empty
            ; (pat, mod_finalizers) <-
                 runRnSplice UntypedPatSplice runMetaP ppr rn_splice
              -- See Note [Delaying modFinalizers in untyped splices].
            ; let p = HsUntypedSpliceTop (ThModFinalizers mod_finalizers) (gParPat pat)
-           ; return (Left (rn_splice, p), emptyFVs) }
+           ; return ((rn_splice, p), emptyFVs) }
               -- Wrap the result of the quasi-quoter in parens so that we don't
               -- lose the outermost location set by runQuasiQuote (#7918)
 
@@ -804,22 +803,24 @@ bound in the pattern to be in scope in the RHS of the pattern. This scope
 management is effectively done by using continuation-passing style in
 GHC.Rename.Pat, through the CpsRn monad. We don't wish to be in that monad here
 (it would create import cycles and generally conflict with renaming other
-splices), so we really want to return a (Pat RdrName) -- the result of
+splices), so we really want to return a (Pat GhcPs) -- the result of
 running the splice -- which can then be further renamed in GHC.Rename.Pat, in
 the CpsRn monad.
 
 The problem is that if we're renaming a splice within a bracket, we
 *don't* want to run the splice now. We really do just want to rename
-it to an HsSplice Name. Of course, then we can't know what variables
+it to an HsUntypedSplice Name. Of course, then we can't know what variables
 are bound within the splice. So we accept any unbound variables and
 rename them again when the bracket is spliced in.  If a variable is brought
 into scope by a pattern splice all is fine.  If it is not then an error is
 reported.
 
-In any case, when we're done in rnSplicePat, we'll either have a
-Pat RdrName (the result of running a top-level splice) or a Pat Name
-(the renamed nested splice). Thus, the awkward return type of
-rnSplicePat.
+In any case, when we're done in rnSplicePat, we'll have both the renamed
+splice, and either a Pat RdrName and ThModFinalizers (the result of running a
+top-level splice) or a splice point name. Thus, rnSplicePat returns both
+HsUntypedSplice GhcRn, and HsUntypedSpliceResult (Pat GhcPs) -- which models
+the existence of either the result of running the splice (HsUntypedSpliceTop),
+or its splice point name if nested (HsUntypedSpliceNested)
 -}
 
 spliceCtxt :: HsUntypedSplice GhcPs -> SDoc

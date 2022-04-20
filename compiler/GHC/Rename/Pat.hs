@@ -612,11 +612,10 @@ rnPatAndThen mk (SumPat _ pat alt arity)
 
 rnPatAndThen mk (SplicePat _ splice)
   = do { eith <- liftCpsFV $ rnSplicePat splice
-       ; case eith of   -- See Note [rnSplicePat] in GHC.Rename.Splice -- ROMES:TODO: rewrite note
-           Left  (rn_splice, HsUntypedSpliceTop mfs pat) -> -- Splice was top-level and thus run, creating Pat GhcPs
+       ; case eith of   -- See Note [rnSplicePat] in GHC.Rename.Splice
+           (rn_splice, HsUntypedSpliceTop mfs pat) -> -- Splice was top-level and thus run, creating Pat GhcPs
                flip SplicePat rn_splice . HsUntypedSpliceTop mfs <$> rnPatAndThen mk pat
-           Left  (rn_splice, HsUntypedSpliceNested splice_name) -> pprPanic "rnPatAndThen: invalid nested splice" (pprUntypedSplice True (Just splice_name) rn_splice)
-           Right already_renamed -> return already_renamed  -- Splice was nested and thus already renamed
+           (rn_splice, HsUntypedSpliceNested splice_name) -> return (SplicePat (HsUntypedSpliceNested splice_name) rn_splice) -- Splice was nested and thus already renamed
        }
 
 --------------------

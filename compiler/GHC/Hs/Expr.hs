@@ -1726,14 +1726,14 @@ the zonker, after typechecking. See Note [Running typed splices in the zonker]
   HsTypedSplice anns (e :: HsExpr GhcPs)
 
 * Output of renamer:
-  HsTypedSplice anns (e :: HsExpr GhcRn)
+  HsTypedSplice (n :: SplicePointName) (e :: HsExpr GhcRn)
 
 * Output of typechecker: (top-level splices only)
   HsTypedSplice (del_splice :: DelayedSplice) (e :: HsExpr GhcTc)
   where 'del_splice' is something the zonker can run to produce
            the syntax tree to splice in.
            See Note [Running typed splices in the zonker]
-  ToDo: what use do we make of the typechecked expression 'e'?
+  ToDo: what use do we make of the typechecked expression 'e'? -- ROMES:TODO delete
 
   NB: we never need to represent typed /nested/ splices in phase GhcTc.
 
@@ -1757,6 +1757,7 @@ to get the life cycle of a quasiquote, s/HsUntypedSpliceExpr/HsQuasiQuote
              produce the syntax tree for 'e2'
         'fins' is a bunch of TH finalisers, to be run later.
 
+-- ROMES:TODO: I think we never use this, and so we can instance XUntypedSplice GhcTc = DataConCantHappen
 * Output of typechecker:
   HsUntypedSplice (HsUntypedSpliceResult fins (e2 :: LHsExpr GhcTc))
                   (HsUntypedSpliceExpr (XUntypedSplice () :: LHsExpr GhcTc))
@@ -1771,9 +1772,8 @@ Untyped /nested/ splices and quasiquotes
 * Output of parser: as above.
 
 * Output of renamer (the splice is added to PendingRnSplices in the monad)
-  HsUntypedSplice (HsUntypedSpliceNested name)
+  HsUntypedSplice (HsUntypedSpliceNested (name :: SplicePointName))
                   (HsUntypedSpliceExpr (e :: LHsExpr GhcRn))
-  where 'name' is the splice point name
 
 * Output of typechecker: not relevant for nested splices
 -}
