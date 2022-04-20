@@ -2925,8 +2925,8 @@ aexp2   :: { ECP }
         | '_'               { ECP $ pvA $ mkHsWildCardPV (getLoc $1) }
 
         -- Template Haskell Extension
-        | splice_typed   { ecpFromExp $ mapLoc (uncurry HsTypedSplice) (reLocA $1) }
         | splice_untyped { ECP $ pvA $ mkHsSplicePV $1 }
+        | splice_typed   { ecpFromExp $ mapLoc (uncurry HsTypedSplice) (reLocA $1) }
 
         | SIMPLEQUOTE  qvar     {% fmap ecpFromExp $ acsA (\cs -> sLL $1 (reLocN $>) $ HsUntypedBracket (EpAnn (glR $1) [mj AnnSimpleQuote $1] cs) (VarBr noExtField True  $2)) }
         | SIMPLEQUOTE  qcon     {% fmap ecpFromExp $ acsA (\cs -> sLL $1 (reLocN $>) $ HsUntypedBracket (EpAnn (glR $1) [mj AnnSimpleQuote $1] cs) (VarBr noExtField True  $2)) }
@@ -2976,7 +2976,7 @@ splice_typed :: { Located ((EpAnnCO, EpAnn [AddEpAnn]), LHsExpr GhcPs) }
         -- See Note [Whitespace-sensitive operator parsing] in GHC.Parser.Lexer
         : PREFIX_DOLLAR_DOLLAR aexp2
                                 {% runPV (unECP $2) >>= \ $2 ->
-                                   acs (\cs -> sLLlA $1 $> $ ((noComments, EpAnn (glR $1) [mj AnnDollarDollar $1] cs), $2)) }
+                                   acs (\cs -> sLLlA $1 $> $ ((noAnn, EpAnn (glR $1) [mj AnnDollarDollar $1] cs), $2)) }
 
 cmdargs :: { [LHsCmdTop GhcPs] }
         : cmdargs acmd                  { $2 : $1 }
