@@ -1711,6 +1711,7 @@ pprQuals quals = interpp'SP quals
 -}
 
 {-
+ROMES:TODO: Rewrite note
 Note [Lifecycle of a splice]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Here is the lifecycle of a top-level splice, including quasiquotes

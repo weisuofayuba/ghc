@@ -615,8 +615,7 @@ rnPatAndThen mk (SplicePat _ splice)
        ; case eith of   -- See Note [rnSplicePat] in GHC.Rename.Splice -- ROMES:TODO: rewrite note
            Left  (rn_splice, HsUntypedSpliceTop mfs pat) -> -- Splice was top-level and thus run, creating Pat GhcPs
                flip SplicePat rn_splice . HsUntypedSpliceTop mfs <$> rnPatAndThen mk pat
-           Left  (_, HsUntypedSpliceNested _) -> undefined
-               -- ROMES:TODO: discussion!!
+           Left  (rn_splice, HsUntypedSpliceNested splice_name) -> pprPanic "rnPatAndThen: invalid nested splice" (pprUntypedSplice True (Just splice_name) rn_splice)
            Right already_renamed -> return already_renamed  -- Splice was nested and thus already renamed
        }
 

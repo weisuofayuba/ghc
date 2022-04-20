@@ -683,10 +683,7 @@ AST is used for the subtraction operation.
                                ge' minus''
         ; return (mkHsWrapPat mult_wrap pat' pat_ty, res) }
 
--- ROMES:TODO: edit comment
--- HsSpliced is an annotation produced by 'GHC.Rename.Splice.rnSplicePat'.
 -- Here we get rid of it and add the finalizers to the global environment.
---
 -- See Note [Delaying modFinalizers in untyped splices] in GHC.Rename.Splice.
   SplicePat (HsUntypedSpliceTop mod_finalizers pat) _ -> do
       { addModFinalizersWithLclEnv mod_finalizers

@@ -850,10 +850,7 @@ tcExpr (HsProjection _ _) _ = panic "GHC.Tc.Gen.Expr: tcExpr: HsProjection: Not 
 ************************************************************************
 -}
 
--- ROMES:TODO: edit comment
--- HsSpliced is an annotation produced by 'GHC.Rename.Splice.rnSpliceExpr'.
 -- Here we get rid of it and add the finalizers to the global environment.
---
 -- See Note [Delaying modFinalizers in untyped splices] in GHC.Rename.Splice.
 tcExpr (HsUntypedSplice (HsUntypedSpliceTop mod_finalizers expr) _)
        res_ty
