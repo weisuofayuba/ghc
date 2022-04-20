@@ -614,7 +614,7 @@ tcTypedSplice splice_name expr res_ty
           RunSplice _          ->
             -- See Note [RunSplice ThLevel] in "GHC.Tc.Types".
             pprPanic ("tcSpliceExpr: attempted to typecheck a splice when " ++
-                      "running another splice") (pprTypedSplice splice_name expr)
+                      "running another splice") (pprTypedSplice (Just splice_name) expr)
           Comp                 -> tcTopSplice expr res_ty
     }
 
@@ -715,10 +715,10 @@ runTopSplice (DelayedSplice lcl_env orig_expr res_ty q_expr)
 ************************************************************************
 -}
 
-typedSpliceCtxtDoc :: IdP GhcRn -> LHsExpr GhcRn -> SDoc
+typedSpliceCtxtDoc :: SplicePointName -> LHsExpr GhcRn -> SDoc
 typedSpliceCtxtDoc n splice
   = hang (text "In the Template Haskell splice")
-         2 (pprTypedSplice n splice)
+         2 (pprTypedSplice (Just n) splice)
 
 spliceResultDoc :: LHsExpr GhcTc -> SDoc
 spliceResultDoc expr

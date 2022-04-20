@@ -714,13 +714,17 @@ ppr_expr (ExprWithTySig _ expr sig)
 
 ppr_expr (ArithSeq _ _ info) = brackets (ppr info)
 
-ppr_expr (HsTypedSplice ext e)   = undefined
-    -- ROMES:TODO: Fix pretty printing without IdPs
-    -- case ghcPass @p of
-    --   GhcPs | (_, _, n) <- ext -> pprTypedSplice n e
-    --   GhcRn | (_, _, n) <- ext -> pprTypedSplice n e
-    --   GhcTc | (n, _)    <- ext -> pprTypedSplice n e
-ppr_expr (HsUntypedSplice _ s) = pprUntypedSplice True s
+ppr_expr (HsTypedSplice ext e)   =
+    case ghcPass @p of
+      GhcPs -> pprTypedSplice Nothing e
+      GhcRn -> pprTypedSplice (Just ext) e
+      GhcTc -> pprTypedSplice Nothing e
+ppr_expr (HsUntypedSplice ext s) =
+    case ghcPass @p of
+      GhcPs -> pprUntypedSplice True Nothing s
+      GhcRn | HsUntypedSpliceTop _ _ <- ext -> pprUntypedSplice True Nothing s
+      GhcRn | HsUntypedSpliceNested n <- ext -> pprUntypedSplice True (Just n) s
+      GhcTc -> dataConCantHappen ext
 
 ppr_expr (HsTypedBracket b e)
   = case ghcPass @p of
@@ -1791,31 +1795,28 @@ instance Data ThModFinalizers where
 -- This is the result of splicing a splice. It is produced by
 -- the renamer and consumed by the typechecker. It lives only between the two.
 data HsUntypedSpliceResult thing  -- 'thing' can be HsExpr or HsType
-  = HsUntypedSpliceTop
+  = HsUntypedSpliceTop -- ROMES:TODO: Do I want to keep these partial field accessors?
       { utsplice_result_finalizers :: ThModFinalizers -- ^ TH finalizers produced by the splice.
       , utsplice_result            :: thing           -- ^ The result of splicing; See Note [Lifecycle of a splice]
       }
   | HsUntypedSpliceNested SplicePointName -- A unique name to identify this splice point
 
--- (IdP id): A unique name to identify this splice point
 type instance XTypedSplice   GhcPs = (EpAnnCO, EpAnn [AddEpAnn])
-type instance XTypedSplice   GhcRn = Name -- The splice point name
+type instance XTypedSplice   GhcRn = SplicePointName
 type instance XTypedSplice   GhcTc = DelayedSplice
 
 type instance XUntypedSplice GhcPs = EpAnnCO
 type instance XUntypedSplice GhcRn = HsUntypedSpliceResult (HsExpr GhcRn)
-type instance XUntypedSplice GhcTc = HsUntypedSpliceResult (HsExpr GhcRn)
+type instance XUntypedSplice GhcTc = DataConCantHappen
 
 -- HsUntypedSplice
 type instance XUntypedSpliceExpr GhcPs = EpAnn [AddEpAnn]
 type instance XUntypedSpliceExpr GhcRn = EpAnn [AddEpAnn]
 type instance XUntypedSpliceExpr GhcTc = DataConCantHappen
 
-type instance XQuasiQuote        (GhcPass p) = IdGhcP p
+type instance XQuasiQuote        p = IdP p
 
-type instance XXUntypedSplice    GhcPs = DataConCantHappen
-type instance XXUntypedSplice    GhcRn = DataConCantHappen
-type instance XXUntypedSplice    GhcTc = NoExtField
+type instance XXUntypedSplice    p = DataConCantHappen
 
 -- See Note [Running typed splices in the zonker]
 -- These are the arguments that are passed to `GHC.Tc.Gen.Splice.runTopSplice`
@@ -1908,32 +1909,39 @@ checker:
         [||1 + $$(f 2)||]
 -}
 
-instance (OutputableBndrId p) => Outputable (HsUntypedSplice (GhcPass p)) where
-  ppr s = pprUntypedSplice True s
-
 pprPendingSplice :: (OutputableBndrId p)
                  => SplicePointName -> LHsExpr (GhcPass p) -> SDoc
 pprPendingSplice n e = angleBrackets (ppr n <> comma <+> ppr (stripParensLHsExpr e))
 
-pprTypedSplice :: (OutputableBndrId p) => IdP (GhcPass p) -> LHsExpr (GhcPass p) -> SDoc
+-- ROMES:TODO: Check whether this printing with Maybe SplicePointName solution is alright.
+pprTypedSplice :: (OutputableBndrId p) => Maybe SplicePointName -> LHsExpr (GhcPass p) -> SDoc
 pprTypedSplice n e = ppr_splice (text "$$") n e
 
+-- ROMES:TODO: Check whether this printing with Maybe SplicePointName solution is alright.
 pprUntypedSplice :: forall p. (OutputableBndrId p)
                  => Bool -- Whether to preceed the splice with "$"
+                 -> Maybe SplicePointName -- Used for pretty printing when exists
                  -> HsUntypedSplice (GhcPass p)
                  -> SDoc
-pprUntypedSplice True  (HsUntypedSpliceExpr _ e) = ppr_splice (text "$") undefined e
-pprUntypedSplice False (HsUntypedSpliceExpr _ e) = ppr_splice empty undefined e
-pprUntypedSplice _ (HsQuasiQuote q s)            = ppr_quasi q (unLoc s)
+pprUntypedSplice True  n (HsUntypedSpliceExpr _ e) = ppr_splice (text "$") n e
+pprUntypedSplice False n (HsUntypedSpliceExpr _ e) = ppr_splice empty n e
+pprUntypedSplice _     _ (HsQuasiQuote q s)        = ppr_quasi q (unLoc s)
 
 ppr_quasi :: OutputableBndr p => p -> FastString -> SDoc
 ppr_quasi quoter quote = char '[' <> ppr quoter <> vbar <>
                            ppr quote <> text "|]"
 
 ppr_splice :: (OutputableBndrId p)
-           => SDoc -> (IdP (GhcPass p)) -> LHsExpr (GhcPass p) -> SDoc
-ppr_splice herald n e
-    = herald <> whenPprDebug (brackets (ppr n)) <> ppr e
+           => SDoc
+           -> Maybe SplicePointName
+           -> LHsExpr (GhcPass p)
+           -> SDoc
+ppr_splice herald mn e
+    = herald
+    <> (case mn of
+         Nothing -> empty
+         Just splice_name -> whenPprDebug (brackets (ppr splice_name)))
+    <> ppr e
 
 
 type instance XExpBr  GhcPs       = NoExtField

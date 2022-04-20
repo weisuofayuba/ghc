@@ -1906,7 +1906,6 @@ instance HiePass p => ToHie (LocatedA (HsUntypedSplice (GhcPass p))) where
       HsQuasiQuote _ ispanFs ->
         [ locOnly (getLocA ispanFs)
         ]
-      XUntypedSplice _ -> undefined -- ROMES:TODO: (this is the allowed noExtField)
 
 instance ToHie (LocatedA (RoleAnnotDecl GhcRn)) where
   toHie (L span annot) = concatM $ makeNodeA annot span : case annot of

@@ -53,7 +53,7 @@ import GHC.Prelude
 import Language.Haskell.Syntax.Pat
 import Language.Haskell.Syntax.Expr ( HsExpr )
 
-import {-# SOURCE #-} GHC.Hs.Expr (pprLExpr, pprUntypedSplice, HsUntypedSpliceResult)
+import {-# SOURCE #-} GHC.Hs.Expr (pprLExpr, pprUntypedSplice, HsUntypedSpliceResult(..))
 
 -- friends:
 import GHC.Hs.Binds
@@ -319,7 +319,12 @@ pprPat (NPlusKPat _ n k _ _ _)  = hcat [ppr_n, char '+', ppr k]
                   GhcPs -> ppr n
                   GhcRn -> ppr n
                   GhcTc -> ppr n
-pprPat (SplicePat _ splice)     = pprUntypedSplice True splice
+pprPat (SplicePat ext splice)   =
+    case ghcPass @p of
+      GhcPs -> pprUntypedSplice True Nothing splice
+      GhcRn | HsUntypedSpliceTop _ _ <- ext -> pprUntypedSplice True Nothing splice
+      GhcRn | HsUntypedSpliceNested n <- ext -> pprUntypedSplice True (Just n) splice
+      GhcTc -> dataConCantHappen ext
 pprPat (SigPat _ pat ty)        = ppr pat <+> dcolon <+> ppr ty
 pprPat (ListPat _ pats)         = brackets (interpp'SP pats)
 pprPat (TuplePat _ pats bx)

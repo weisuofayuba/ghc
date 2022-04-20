@@ -316,7 +316,7 @@ no_anon_wc_ty lty = go lty
       HsQualTy { hst_ctxt = ctxt
                , hst_body = ty }  -> gos (unLoc ctxt) && go ty
       HsSpliceTy (HsUntypedSpliceTop _ ty) _ -> go $ L noSrcSpanA ty
-      HsSpliceTy (HsUntypedSpliceNested _) _ -> undefined -- ROMES:TODO:
+      HsSpliceTy (HsUntypedSpliceNested _) _ -> True
       HsTyLit{} -> True
       HsTyVar{} -> True
       HsStarTy{} -> True

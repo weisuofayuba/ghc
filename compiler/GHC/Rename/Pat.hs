@@ -610,13 +610,6 @@ rnPatAndThen mk (SumPat _ pat alt arity)
        ; return (SumPat noExtField pat alt arity)
        }
 
--- ROMES:TODO: Delete comment
--- This only used to happen because of the recursive call on the Left case in
--- the function body of the next pattern matched
--- If a splice has been run already, just rename the result.
--- rnPatAndThen mk (SplicePat x (XSplice (mfs, HsSplicedPat pat))
---   = SplicePat x . HsSpliced x2 mfs . HsSplicedPat <$> rnPatAndThen mk pat
-
 rnPatAndThen mk (SplicePat _ splice)
   = do { eith <- liftCpsFV $ rnSplicePat splice
        ; case eith of   -- See Note [rnSplicePat] in GHC.Rename.Splice -- ROMES:TODO: rewrite note

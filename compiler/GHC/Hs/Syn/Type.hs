@@ -136,9 +136,7 @@ hsExprType e@(HsTypedSplice{}) = pprPanic "hsExprType: Unexpected HsTypedSplice"
                                       -- Typed splices should have been eliminated during zonking, but we
                                       -- can't use `dataConCantHappen` since they are still present before
                                       -- than in the typechecked AST.
--- ROMES:TODO: Use DataConCantHappen for HsUntypedSplice GhcTc?
-hsExprType e@(HsUntypedSplice{}) = pprPanic "hsExprType: Unexpected HsUntypedSplice"
-                                            (ppr e)
+hsExprType (HsUntypedSplice ext _) = dataConCantHappen ext
 hsExprType (HsProc _ _ lcmd_top) = lhsCmdTopType lcmd_top
 hsExprType (HsStatic (_, ty) _s) = ty
 hsExprType (HsPragE _ _ e) = lhsExprType e

@@ -1057,7 +1057,7 @@ tcPatToExpr name args pat = go pat
                                                        [noLocA (HsOverLit noAnn n)]
         | otherwise                 = return $ HsOverLit noAnn n
     go1 (SplicePat (HsUntypedSpliceTop _ pat) _) = go1 pat
-    go1 (SplicePat (HsUntypedSpliceNested _) _)  = undefined -- ROMES:TODO
+    go1 (SplicePat (HsUntypedSpliceNested _) _)  = panic "tcPatToExpr: invalid nested splice"
     go1 (XPat (HsPatExpanded _ pat))= go1 pat
 
     -- See Note [Invertible view patterns]

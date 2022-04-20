@@ -692,7 +692,7 @@ AST is used for the subtraction operation.
       { addModFinalizersWithLclEnv mod_finalizers
       ; tc_pat pat_ty penv pat thing_inside }
 
-  SplicePat (HsUntypedSpliceNested _) _ -> undefined -- ROMES:TODO:
+  SplicePat (HsUntypedSpliceNested _) _ -> panic "tc_pat: nested splice in splice pat"
 
   XPat (HsPatExpanded lpat rpat) -> do
     { (rpat', res) <- tc_pat pat_ty penv rpat thing_inside

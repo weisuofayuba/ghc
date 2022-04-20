@@ -1046,7 +1046,7 @@ tc_infer_hs_type mode (HsKindSig _ ty sig)
 tc_infer_hs_type mode (HsSpliceTy (HsUntypedSpliceTop _ ty) _)
   = tc_infer_hs_type mode ty
 
-tc_infer_hs_type _ (HsSpliceTy (HsUntypedSpliceNested _) _) = pprPanic "ROMES:TODO: panic on tc_hs_type nested splice" undefined -- ROMES:TODO:
+tc_infer_hs_type _ (HsSpliceTy (HsUntypedSpliceNested n) s) = pprPanic "tc_infer_hs_type: invalid nested splice" (pprUntypedSplice True (Just n) s)
 
 tc_infer_hs_type mode (HsDocTy _ ty _) = tc_infer_lhs_type mode ty
 
@@ -1158,7 +1158,7 @@ tc_hs_type mode (HsSpliceTy (HsUntypedSpliceTop mod_finalizers ty) _)
   = do addModFinalizersWithLclEnv mod_finalizers
        tc_hs_type mode ty exp_kind
 
-tc_hs_type _ (HsSpliceTy (HsUntypedSpliceNested _) _) _ = pprPanic "ROMES:TODO: panic on tc_hs_type nested splice" undefined -- ROMES:TODO:
+tc_hs_type _ (HsSpliceTy (HsUntypedSpliceNested n) s) _ = pprPanic "tc_hs_type: invalid nested splice" (pprUntypedSplice True (Just n) s)
 
 ---------- Functions and applications
 tc_hs_type mode (HsFunTy _ mult ty1 ty2) exp_kind

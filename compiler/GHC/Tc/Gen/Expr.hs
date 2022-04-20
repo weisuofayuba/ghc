@@ -850,6 +850,7 @@ tcExpr (HsProjection _ _) _ = panic "GHC.Tc.Gen.Expr: tcExpr: HsProjection: Not 
 ************************************************************************
 -}
 
+-- ROMES:TODO: edit comment
 -- HsSpliced is an annotation produced by 'GHC.Rename.Splice.rnSpliceExpr'.
 -- Here we get rid of it and add the finalizers to the global environment.
 --
@@ -858,7 +859,7 @@ tcExpr (HsUntypedSplice (HsUntypedSpliceTop mod_finalizers expr) _)
        res_ty
   = do addModFinalizersWithLclEnv mod_finalizers
        tcExpr expr res_ty
-tcExpr (HsUntypedSplice (HsUntypedSpliceNested _) _) _ = undefined -- ROMES:TODO:
+tcExpr (HsUntypedSplice (HsUntypedSpliceNested _) _) _ = panic "tcExpr: invalid nested splice"
 tcExpr (HsTypedSplice ext splice) res_ty = tcTypedSplice ext splice res_ty
 tcExpr e@(HsTypedBracket _ body) res_ty = tcTypedBracket e body res_ty
 tcExpr e@(HsUntypedBracket ps body) res_ty = tcUntypedBracket e body ps res_ty

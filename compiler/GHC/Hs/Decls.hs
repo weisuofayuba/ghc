@@ -313,8 +313,8 @@ type instance XXSpliceDecl     (GhcPass _) = DataConCantHappen
 
 instance OutputableBndrId p
        => Outputable (SpliceDecl (GhcPass p)) where
-  ppr (SpliceDecl _ (L _ e) DollarSplice) = pprUntypedSplice True e
-  ppr (SpliceDecl _ (L _ e) BareSplice)   = pprUntypedSplice False e 
+  ppr (SpliceDecl _ (L _ e) DollarSplice) = pprUntypedSplice True Nothing e
+  ppr (SpliceDecl _ (L _ e) BareSplice)   = pprUntypedSplice False Nothing e
 
 {-
 ************************************************************************

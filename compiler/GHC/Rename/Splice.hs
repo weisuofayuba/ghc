@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -442,7 +443,7 @@ rnUntypedSplice (HsQuasiQuote quoter quote)
 rnTypedSpliceExpr :: LHsExpr GhcPs -- Typed splice expression
                   -> RnM (HsExpr GhcRn, FreeVars)
 rnTypedSpliceExpr expr
-  = addErrCtxt (hang (text "In the typed splice:") 2 ({- ROMES:TODO: Correct typed ppr with $$ -} ppr expr)) $ do
+  = addErrCtxt (hang (text "In the typed splice:") 2 (pprTypedSplice Nothing expr)) $ do
     { stage <- getStage
     ; case stage of
         Brack pop_stage RnPendingTyped
@@ -477,7 +478,8 @@ rnTypedSpliceExpr expr
     rnTypedSplice :: RnM (HsExpr GhcRn, FreeVars)
     rnTypedSplice =
       do { loc <- getSrcSpanM
-         -- The renamer allocates a splice-point name to every typed splice (incl the top level ones for which it will not ultimately be used)
+         -- The renamer allocates a splice-point name to every typed splice
+         -- (incl the top level ones for which it will not ultimately be used)
          ; n' <- newLocalBndrRn (L (noAnnSrcSpan loc) unqualSplice)
          ; (expr', fvs) <- rnLExpr expr
          ; return (HsTypedSplice n' expr', fvs) }
@@ -751,7 +753,7 @@ rnSpliceDecl (SpliceDecl _ (L loc splice) flg)
        = ( makePending UntypedDeclSplice name rn_splice
          , SpliceDecl noExtField (L loc rn_splice) flg)
 
-    run_decl_splice rn_splice  = pprPanic "rnSpliceDecl" (ppr rn_splice)
+    run_decl_splice rn_splice  = pprPanic "rnSpliceDecl" (pprUntypedSplice True Nothing rn_splice)
 
 rnTopSpliceDecls :: HsUntypedSplice GhcPs -> RnM ([LHsDecl GhcPs], FreeVars)
 -- Declaration splice at the very top level of the module
@@ -822,7 +824,7 @@ rnSplicePat.
 
 spliceCtxt :: HsUntypedSplice GhcPs -> SDoc
 spliceCtxt splice
-  = hang (text "In the" <+> what) 2 (ppr splice)
+  = hang (text "In the" <+> what) 2 (pprUntypedSplice True Nothing splice)
   where
     what = case splice of
              HsUntypedSpliceExpr {} -> text "untyped splice:"
