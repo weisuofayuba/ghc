@@ -488,6 +488,9 @@ then
     echo -e "#!/usr/bin/env bash\\nexec \"$EMSDK_LLVM/bin/llvm-ranlib\" \"\$@\"" > "$ghcjsbin/js-unknown-ghcjs-ranlib"
     chmod 755 "$ghcjsbin/js-unknown-ghcjs-ranlib"
 
+    echo -e "#!/usr/bin/env bash\\nexec \"$EMSDK_LLVM/bin/llvm-nm\" \"\$@\"" > "$ghcjsbin/js-unknown-ghcjs-nm"
+    chmod 755 "$ghcjsbin/js-unknown-ghcjs-nm"
+
     dnl the linker shouldn't be used because GHC does the JS linking.
     dnl it makes no harm to pass emscripten's one here though and it avoids
     dnl dealing with the rest of the build system that assumes that a linker is
