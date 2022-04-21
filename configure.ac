@@ -454,6 +454,50 @@ then
     AC_PATH_PROG([Genlib],[genlib])
 fi
 
+if test "$TargetOS" = "ghcjs"
+then
+
+    AC_ARG_VAR(EMSDK,[Use as the full path to Emscripten. [default=autodetect]])
+    AC_ARG_VAR(EMSDK_LLVM,[Use as the full path to Emscripten LLVM. [default=autodetect]])
+
+    if test "$EMSDK" != "" ; then
+        echo "Using emsdk: $EMSDK"
+    else
+        echo -e "Error: Could not find Emscripten SDK.\nCheck the EMSDK environment variable."
+        exit 1
+    fi
+
+    if test "$EMSDK_LLVM" != "" ; then
+        echo "Using emsdk LLVM: $EMSDK_LLVM"
+    else
+        echo -e "Error: Could not find LLVM for Emscripten SDK.\nCheck the EMSDK_LLVM environment variable."
+        exit 1
+    fi
+
+    test -d inplace || mkdir inplace
+
+    ghcjsbin="$hardtop/inplace/ghcjs_toolchain/bin/"
+    mkdir -p $ghcjsbin
+
+    echo -e "#!/usr/bin/env bash\\nexec \"$EMSDK/emcc\" \"\$@\"" > "$ghcjsbin/js-unknown-ghcjs-cc"
+    chmod 755 "$ghcjsbin/js-unknown-ghcjs-cc"
+
+    echo -e "#!/usr/bin/env bash\\nexec \"$EMSDK_LLVM/bin/llvm-ar\" \"\$@\"" > "$ghcjsbin/js-unknown-ghcjs-ar"
+    chmod 755 "$ghcjsbin/js-unknown-ghcjs-ar"
+
+    echo -e "#!/usr/bin/env bash\\nexec \"$EMSDK_LLVM/bin/llvm-ranlib\" \"\$@\"" > "$ghcjsbin/js-unknown-ghcjs-ranlib"
+    chmod 755 "$ghcjsbin/js-unknown-ghcjs-ranlib"
+
+    dnl the linker shouldn't be used because GHC does the JS linking.
+    dnl it makes no harm to pass emscripten's one here though and it avoids
+    dnl dealing with the rest of the build system that assumes that a linker is
+    dnl available.
+    echo -e "#!/usr/bin/env bash\\nexec \"$EMSDK_LLVM/bin/llvm-ld\" \"\$@\"" > "$ghcjsbin/js-unknown-ghcjs-ld"
+    chmod 755 "$ghcjsbin/js-unknown-ghcjs-ld"
+
+    export PATH=$ghcjsbin:$PATH
+fi
+
 # We don't want to bundle a MinGW-w64 toolchain
 # So we have to find these individual tools.
 # See Note [tooldir: How GHC finds mingw on Windows]
